@@ -1,102 +1,126 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
 export class ContractsService {
-  private readonly logger = new Logger(ContractsService.name);
-  private readonly authorizerUrl: string;
-  private readonly EXCLUDED_TENANT_NAME = 'cyclonet';
+  constructor(private readonly prisma: PrismaService) {}
 
-  constructor(
-    private readonly httpService: HttpService,
-    private readonly configService: ConfigService,
-  ) {
-    this.authorizerUrl = this.configService.get<string>('AUTH_SERVICE_URL', 'http://localhost:3000');
+  /** Genera el contrato cuando se acepta una propuesta */
+  async generateFromProposal(proposalId: string) {
+    const proposal = await this.prisma.proposal.findUnique({
+      where: { id: proposalId },
+      include: { request: true, provider: true },
+    });
+    if (!proposal) throw new NotFoundException('Propuesta no encontrada');
+    if (proposal.status !== 'ACCEPTED') throw new BadRequestException('La propuesta no ha sido aceptada');
+
+    // Verificar que no exista ya un contrato para esta solicitud
+    const existing = await this.prisma.serviceContract.findUnique({
+      where: { requestId: proposal.requestId },
+    });
+    if (existing) return existing;
+
+    // Generar código único SHO-XXXXX
+    const count = await this.prisma.serviceContract.count();
+    const code = `SHO-${String(count + 1).padStart(5, '0')}`;
+
+    return this.prisma.serviceContract.create({
+      data: {
+        code,
+        requestId: proposal.requestId,
+        proposalId: proposal.id,
+        requesterId: proposal.request.requesterId,
+        providerId: proposal.providerId,
+        agreedPrice: proposal.price,
+        currency: proposal.currency,
+        status: 'PENDING',
+      },
+      include: { request: { include: { category: true } }, proposal: true },
+    });
   }
 
-  async findAll(tenantId?: string, rol?: string, authToken?: string) {
-    try {
-      let url = `${this.authorizerUrl}/api/contracts`;
-      
-      // Si el usuario tiene rol 'adminInvoices', usar el endpoint específico por tenant
-      // Si tiene rol 'adminFactonet', usar el endpoint general
-      if (rol === 'adminInvoices' && tenantId) {
-        url = `${this.authorizerUrl}/api/contracts/tenant/${tenantId}`;
-      } else {
-        url = `${this.authorizerUrl}/api/contracts?limit=100&offset=0`;
-      }
-      
-      const response = await firstValueFrom(
-        this.httpService.get(url, {
-          headers: {
-            'Authorization': authToken || `Bearer ${process.env.JWT_SECRET}`,
-            'Content-Type': 'application/json'
-          }
-        })
-      );
-      
-      const contracts = response.data?.data || response.data || [];
-      return contracts.filter((contract: any) => !this.isCyclonetTenant(contract));
-    } catch (error) {
-      this.logger.error('Error fetching contracts from Authoriza:', error.message);
-      return [];
+  /** Firmar contrato (ambas partes) */
+  async sign(userId: string, contractId: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
+    if (!profile) throw new NotFoundException('Perfil no encontrado');
+
+    const contract = await this.prisma.serviceContract.findUnique({ where: { id: contractId } });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+
+    const now = new Date();
+    const update: any = {};
+
+    if (contract.requesterId === profile.id && !contract.requesterSignedAt) {
+      update.requesterSignedAt = now;
+    } else if (contract.providerId === profile.id && !contract.providerSignedAt) {
+      update.providerSignedAt = now;
+    } else {
+      throw new BadRequestException('Ya firmaste este contrato o no eres parte de él');
     }
-  }
 
-  private isCyclonetTenant(contract: any): boolean {
-    const businessName = (contract.user?.basicData?.legalEntityData?.businessName || '').toLowerCase();
-    return businessName.includes(this.EXCLUDED_TENANT_NAME);
-  }
+    const updated = await this.prisma.serviceContract.update({
+      where: { id: contractId },
+      data: update,
+    });
 
-  async updateStatus(contractId: string, status: string, authToken?: string) {
-    try {
-      const response = await fetch(`http://localhost:3000/api/contracts/${contractId}/status`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': authToken || `Bearer ${process.env.JWT_SECRET}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ status })
+    // Si ambos firmaron, activar el contrato
+    if (updated.requesterSignedAt && updated.providerSignedAt) {
+      return this.prisma.serviceContract.update({
+        where: { id: contractId },
+        data: { status: 'SIGNED', startedAt: now },
       });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        const error = new Error(errorData.message || 'Failed to update contract status');
-        (error as any).status = response.status;
-        (error as any).response = { data: errorData };
-        throw error;
-      }
-      
-      return await response.json();
-    } catch (error) {
-      throw error;
     }
+
+    return updated;
   }
 
-  async uploadContractPDF(contractId: string, pdfBuffer: Buffer, authToken?: string): Promise<string> {
-    try {
-      const base64PDF = pdfBuffer.toString('base64');
-      
-      const response = await fetch(`http://localhost:3000/api/contracts/${contractId}/pdf`, {
-        method: 'POST',
-        headers: {
-          'Authorization': authToken || `Bearer ${process.env.JWT_SECRET}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ pdfBuffer: base64PDF })
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to upload PDF');
-      }
-      
-      const result = await response.json();
-      return result.pdfUrl;
-    } catch (error) {
-      console.error('Error uploading PDF:', error);
-      throw new Error('Failed to upload PDF to server');
+  /** Marcar servicio como completado (cualquiera de las partes inicia; ambos deben confirmar) */
+  async markCompleted(userId: string, contractId: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
+    if (!profile) throw new NotFoundException('Perfil no encontrado');
+
+    const contract = await this.prisma.serviceContract.findUnique({ where: { id: contractId } });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+    if (contract.requesterId !== profile.id && contract.providerId !== profile.id) {
+      throw new BadRequestException('No eres parte de este contrato');
     }
+    if (!['SIGNED', 'IN_PROGRESS'].includes(contract.status)) {
+      throw new BadRequestException('El contrato no está en un estado que permita marcar como completado');
+    }
+
+    return this.prisma.serviceContract.update({
+      where: { id: contractId },
+      data: { status: 'COMPLETED', completedAt: new Date() },
+    });
+  }
+
+  /** Mis contratos (como solicitante o proveedor) */
+  async findMyContracts(userId: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
+    if (!profile) return [];
+
+    return this.prisma.serviceContract.findMany({
+      where: { OR: [{ requesterId: profile.id }, { providerId: profile.id }] },
+      include: {
+        request: { include: { category: true } },
+        proposal: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  /** Detalle de un contrato */
+  async findOne(contractId: string) {
+    const contract = await this.prisma.serviceContract.findUnique({
+      where: { id: contractId },
+      include: {
+        request: { include: { category: true, requester: { select: { displayName: true, avatarUrl: true } } } },
+        proposal: { include: { provider: { select: { displayName: true, avatarUrl: true } } } },
+        ratings: true,
+        transaction: true,
+      },
+    });
+    if (!contract) throw new NotFoundException('Contrato no encontrado');
+    return contract;
   }
 }

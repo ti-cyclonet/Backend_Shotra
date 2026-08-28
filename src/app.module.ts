@@ -1,23 +1,35 @@
 import { Module } from '@nestjs/common';
-import { configModule } from './config.module';
+import { APP_GUARD } from '@nestjs/core';
+import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
-import { CommonModule } from './common/common.module';
+import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { ProfilesModule } from './profiles/profiles.module';
+import { CategoriesModule } from './categories/categories.module';
+import { RequestsModule } from './requests/requests.module';
+import { ProposalsModule } from './proposals/proposals.module';
 import { ContractsModule } from './contracts/contracts.module';
-import { DashboardModule } from './dashboard/dashboard.module';
-import { InvoicesModule } from './invoices/invoices.module';
-import { PeriodsModule } from './periods/periods.module';
-import { ReportsModule } from './reports/reports.module';
+import { RatingsModule } from './ratings/ratings.module';
+import { MessagingModule } from './messaging/messaging.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
-    configModule,
+    PrismaModule,
     AuthModule,
-    CommonModule,
+    HealthModule,
+    ProfilesModule,
+    CategoriesModule,
+    RequestsModule,
+    ProposalsModule,
     ContractsModule,
-    DashboardModule,
-    InvoicesModule,
-    PeriodsModule,
-    ReportsModule,
+    RatingsModule,
+    MessagingModule,
+  ],
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
   ],
 })
 export class AppModule {}

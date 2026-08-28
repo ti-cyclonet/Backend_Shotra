@@ -1,0 +1,307 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+// ─── Perfil de usuario (extiende al usuario de Authoriza) ──────────────────────
+model UserProfile {
+  id              String   @id @default(uuid())
+  authorizaUserId String   @unique // ID del usuario en Authoriza
+  email           String   @unique
+  displayName     String
+  bio             String?
+  phone           String?
+  avatarUrl       String?
+  
+  // Geolocalización por defecto del usuario
+  latitude        Float?
+  longitude       Float?
+  address         String?
+  city            String?
+  serviceRadius   Int      @default(10) // km que está dispuesto a desplazarse
+
+  // Configuración de ofertante
+  isProvider      Boolean  @default(false) // si ofrece servicios
+  isAvailable     Boolean  @default(false) // "Listo para ganar" (online/activo)
+  
+  // Métricas de reputación (calculadas)
+  averageRating   Float    @default(0)
+  totalRatings    Int      @default(0)
+  completedJobs   Int      @default(0)
+  level           Int      @default(1)
+
+  // Relaciones
+  skills          ProviderSkill[]
+  requestsMade    ServiceRequest[]  @relation("Requester")
+  proposalsMade   Proposal[]
+  ratingsGiven    Rating[]          @relation("RatingAuthor")
+  ratingsReceived Rating[]          @relation("RatingTarget")
+  messagesSent    Message[]
+  portfolio       PortfolioItem[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("user_profiles")
+}
+
+// ─── Habilidades del ofertante ─────────────────────────────────────────────────
+model ProviderSkill {
+  id          String   @id @default(uuid())
+  profileId   String
+  profile     UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  categoryId  String
+  category    ServiceCategory @relation(fields: [categoryId], references: [id])
+  description String?
+  yearsExp    Int?     @default(0)
+  verified    Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+
+  @@unique([profileId, categoryId])
+  @@map("provider_skills")
+}
+
+// ─── Portafolio (galería de trabajos previos) ──────────────────────────────────
+model PortfolioItem {
+  id          String   @id @default(uuid())
+  profileId   String
+  profile     UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title       String
+  description String?
+  imageUrl    String
+  categoryId  String?
+
+  createdAt   DateTime @default(now())
+
+  @@map("portfolio_items")
+}
+
+// ─── Categorías de servicios (jerárquicas) ─────────────────────────────────────
+model ServiceCategory {
+  id          String   @id @default(uuid())
+  name        String
+  slug        String   @unique
+  icon        String?  // nombre de ícono o URL
+  description String?
+  parentId    String?
+  parent      ServiceCategory?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    ServiceCategory[] @relation("CategoryTree")
+  isActive    Boolean  @default(true)
+  order       Int      @default(0)
+
+  skills      ProviderSkill[]
+  requests    ServiceRequest[]
+
+  createdAt   DateTime @default(now())
+
+  @@map("service_categories")
+}
+
+// ─── Solicitud de servicio ─────────────────────────────────────────────────────
+model ServiceRequest {
+  id              String   @id @default(uuid())
+  requesterId     String
+  requester       UserProfile @relation("Requester", fields: [requesterId], references: [id])
+  categoryId      String
+  category        ServiceCategory @relation(fields: [categoryId], references: [id])
+
+  title           String
+  description     String
+  budgetMin       Float?
+  budgetMax       Float?
+  currency        String   @default("COP")
+
+  // Ubicación del servicio
+  latitude        Float?
+  longitude       Float?
+  address         String?
+  isRemote        Boolean  @default(false) // si puede ser a distancia
+
+  // Temporalidad
+  scheduledAt     DateTime?  // cuándo se necesita el servicio
+  isUrgent        Boolean    @default(false)
+  expiresAt       DateTime?  // cuándo deja de aceptar propuestas
+
+  // Estado del flujo
+  status          RequestStatus @default(PUBLISHED)
+
+  // Relaciones
+  proposals       Proposal[]
+  contract        ServiceContract?
+  messages        Message[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("service_requests")
+}
+
+enum RequestStatus {
+  DRAFT
+  PUBLISHED
+  IN_PROPOSALS   // tiene propuestas activas
+  ACCEPTED       // se aceptó una propuesta
+  IN_PROGRESS    // el servicio está en ejecución
+  COMPLETED      // ambas partes confirman finalización
+  EVALUATED      // se hicieron las evaluaciones
+  CANCELLED
+  EXPIRED
+}
+
+// ─── Propuesta / Cotización ────────────────────────────────────────────────────
+model Proposal {
+  id            String   @id @default(uuid())
+  requestId     String
+  request       ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  providerId    String
+  provider      UserProfile @relation(fields: [providerId], references: [id])
+
+  price         Float
+  currency      String   @default("COP")
+  description   String   // propuesta de valor
+  estimatedTime String?  // "2 horas", "3 días", etc.
+  
+  status        ProposalStatus @default(PENDING)
+
+  contract      ServiceContract?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("proposals")
+}
+
+enum ProposalStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+// ─── Contrato de servicio (generado al aceptar propuesta) ──────────────────────
+model ServiceContract {
+  id              String   @id @default(uuid())
+  code            String   @unique // SHO-00001
+  requestId       String   @unique
+  request         ServiceRequest @relation(fields: [requestId], references: [id])
+  proposalId      String   @unique
+  proposal        Proposal @relation(fields: [proposalId], references: [id])
+  
+  requesterId     String   // quien contrata
+  providerId      String   // quien ejecuta
+
+  agreedPrice     Float
+  currency        String   @default("COP")
+  terms           String?  // términos adicionales
+
+  // Firmas digitales
+  requesterSignedAt DateTime?
+  providerSignedAt  DateTime?
+
+  // Estado
+  status          ContractStatus @default(PENDING)
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  // Evaluaciones
+  ratings         Rating[]
+  transaction     Transaction?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("service_contracts")
+}
+
+enum ContractStatus {
+  PENDING         // generado, pendiente de firmas
+  SIGNED          // ambos firmaron
+  IN_PROGRESS     // servicio en ejecución
+  COMPLETED       // servicio finalizado, pendiente de evaluación
+  EVALUATED       // ambas evaluaciones hechas
+  DISPUTED        // hay un conflicto
+  CANCELLED
+}
+
+// ─── Evaluación / Rating (doble vía) ──────────────────────────────────────────
+model Rating {
+  id          String   @id @default(uuid())
+  contractId  String
+  contract    ServiceContract @relation(fields: [contractId], references: [id])
+  authorId    String
+  author      UserProfile @relation("RatingAuthor", fields: [authorId], references: [id])
+  targetId    String
+  target      UserProfile @relation("RatingTarget", fields: [targetId], references: [id])
+
+  score       Int      // 1-5
+  comment     String?
+  // Criterios específicos
+  quality     Int?     // 1-5
+  punctuality Int?     // 1-5
+  communication Int?   // 1-5
+
+  createdAt   DateTime @default(now())
+
+  @@unique([contractId, authorId]) // un solo rating por persona por contrato
+  @@map("ratings")
+}
+
+// ─── Mensajería / Chat ─────────────────────────────────────────────────────────
+model Message {
+  id          String   @id @default(uuid())
+  requestId   String
+  request     ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      UserProfile @relation(fields: [senderId], references: [id])
+  content     String
+  type        MessageType @default(TEXT)
+  readAt      DateTime?
+
+  createdAt   DateTime @default(now())
+
+  @@map("messages")
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  LOCATION
+  SYSTEM    // mensajes automáticos del sistema
+}
+
+// ─── Transacción financiera ────────────────────────────────────────────────────
+model Transaction {
+  id            String   @id @default(uuid())
+  contractId    String   @unique
+  contract      ServiceContract @relation(fields: [contractId], references: [id])
+
+  grossAmount   Float    // monto bruto acordado
+  platformFee   Float    @default(0) // comisión Shotra
+  netAmount     Float    // lo que recibe el ofertante
+  currency      String   @default("COP")
+
+  status        TransactionStatus @default(PENDING)
+  
+  // Referencia a FactoNet (factura/cuenta de cobro)
+  factonetInvoiceId String?
+
+  paidAt        DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("transactions")
+}
+
+enum TransactionStatus {
+  PENDING
+  INVOICED      // cuenta de cobro generada en FactoNet
+  PAID
+  REFUNDED
+}

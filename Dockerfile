@@ -1,24 +1,17 @@
-# Etapa 1: Build
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 WORKDIR /app
-
 COPY package*.json ./
-COPY nest-cli.json ./
-RUN npm install --legacy-peer-deps
-
+RUN npm install
 COPY . .
-RUN ./node_modules/.bin/nest build
+RUN npx prisma generate
+RUN npx nest build
 
-# Etapa 2: Imagen final
-FROM node:18-alpine
+FROM node:20-alpine
 WORKDIR /app
-
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package*.json ./
-
+COPY --from=builder /app/prisma ./prisma
 ENV NODE_ENV=production
-ENV PORT=3003
-EXPOSE 3003
-
+EXPOSE 4100
 CMD ["node", "dist/main"]
