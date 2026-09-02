@@ -1,6 +1,8 @@
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
+  // native = entorno local; debian-openssl-3.0.x = contenedor node:20-slim en la EC2
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
