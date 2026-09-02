@@ -3,6 +3,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 
+// Deploy: engine de Prisma sobre node:20-slim (debian-openssl-3.0.x)
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
