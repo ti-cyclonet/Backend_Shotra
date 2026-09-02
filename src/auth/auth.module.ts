@@ -1,22 +1,18 @@
 import { Module } from '@nestjs/common';
-import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { HttpModule } from '@nestjs/axios';
-import { AuthService } from './auth.service';
-import { AuthController } from './auth.controller';
+import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { ShotraAccessGuard } from './guards/shotra-access.guard';
 
 @Module({
   imports: [
-    PassportModule,
-    HttpModule,
+    PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({
-      secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: '24h' },
+      secret: process.env.AUTHORIZA_JWT_SECRET || process.env.JWT_SECRET || 'default',
     }),
   ],
-  providers: [AuthService, JwtStrategy],
-  controllers: [AuthController],
-  exports: [AuthService],
+  providers: [JwtStrategy, JwtAuthGuard, ShotraAccessGuard],
+  exports: [JwtAuthGuard, ShotraAccessGuard, JwtModule],
 })
 export class AuthModule {}

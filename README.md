@@ -1,153 +1,149 @@
-# 🧾 Backend Factonet
+# SHOTRA — Backend
 
-![NestJS](https://img.shields.io/badge/NestJS-E0234E?style=for-the-badge&logo=nestjs&logoColor=white)
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-316192?style=for-the-badge&logo=postgresql&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+Marketplace de intermediación de servicios del ecosistema CycloNet.
+NestJS + Prisma + PostgreSQL/PostGIS. Puerto `4100`.
 
-## 📋 Descripción
+- **Authoriza**: control de acceso (roles/planes) y facturación (fuente de verdad de facturas).
+- **FactoNet**: portal de pagos de las facturas emitidas en Authoriza.
 
-Backend Factonet es una API REST desarrollada con **NestJS** y **TypeScript** para la gestión completa de facturación. El sistema está integrado con el ecosistema Cyclonet y se conecta con Backend_Authoriza para la autenticación.
+---
 
-## ✨ Características principales
+## Puesta en marcha (local, contra RDS staging)
 
-- 🔐 **Autenticación JWT** integrada con Backend_Authoriza
-- 👥 **Gestión de clientes** completa
-- 📦 **Catálogo de productos** con control de inventario
-- 🧾 **Facturación electrónica** con numeración automática
-- 📊 **Cálculo automático** de impuestos y totales
-- 🗄️ **Base de datos PostgreSQL** con esquema `billing`
-- ☁️ **Integración Cloudinary** para documentos
-- 📖 **Documentación automática** con Swagger
+1. Túnel SSH a la base de datos staging:
 
-## 🛠 Tecnologías utilizadas
+   ```
+   ssh -i C:\Users\AlfredoMamby\cyclonet-ec2-key.pem -N ^
+     -o ServerAliveInterval=30 -o ServerAliveCountMax=3 ^
+     -L 5433:cyclonet-db.c29kws0qk0kv.us-east-1.rds.amazonaws.com:5432 ^
+     ec2-user@3.95.90.144
+   ```
 
-| Tecnología | Descripción |
-|------------|------------|
-| **NestJS** | Framework backend Node.js con TypeScript |
-| **TypeScript** | Lenguaje con tipado fuerte |
-| **PostgreSQL** | Base de datos relacional |
-| **TypeORM** | ORM para TypeScript |
-| **JWT** | Autenticación con tokens |
-| **Docker** | Contenedores para desarrollo |
-| **Cloudinary** | Almacenamiento de archivos |
+   `.env` → `DATABASE_URL=postgresql://cyclonet_admin:<pass>@localhost:5433/shotra_staging`
 
-## 🚀 Instalación y configuración
+2. Migrar + generar cliente + seed:
 
-### Requisitos previos
-- Node.js (v16+)
-- Docker y Docker Compose
-- Backend_Authoriza ejecutándose en puerto 3000
+   ```
+   npx prisma migrate dev
+   npx prisma db seed
+   ```
 
-### 1. Instalar dependencias
-```bash
-npm install
-```
+3. Arrancar en desarrollo:
 
-### 2. Configurar variables de entorno
-Editar el archivo `.env` con tus configuraciones:
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=5434
-DB_USERNAME=postgres
-DB_PASSWORD=123456
-DB_NAME=FactonetDB
+   ```
+   npm run dev
+   ```
 
-# Application
-PORT=3002
+> Si `prisma generate` falla con `EPERM ... query_engine-windows.dll.node`, hay un
+> backend corriendo que tiene bloqueado el engine. Deténlo y reintenta.
 
-# Auth Service
-AUTH_SERVICE_URL=http://localhost:3000
+---
 
-# Cloudinary
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-```
+## Sistema de comisiones (monetización)
 
-### 3. Iniciar base de datos
-```bash
-docker-compose up -d
-```
+SHOTRA cobra una **comisión de intermediación al ofertante** por cada servicio
+completado. El solicitante paga gratis (no depende de plan). El ofertante recibe
+el valor convenido **menos** la comisión.
 
-### 4. Crear esquema de base de datos
-```bash
-docker exec -it factonetdb psql -U postgres -d FactonetDB
-CREATE SCHEMA billing;
-```
+### Reglas de comisión (`CommissionRule`)
 
-### 5. Ejecutar la aplicación
-```bash
-# Desarrollo
-npm run start:dev
+| Plan | Tasa | minFee | maxFee (tope por contrato) |
+|------|------|--------|-----------------------------|
+| FREE | 10%  | 0      | $50.000                     |
+| PRO  | 5%   | 0      | $50.000                     |
 
-# Producción
-npm run build
-npm run start:prod
-```
+- Base de cálculo: `agreedPrice` (precio de la propuesta aceptada).
+- El plan del ofertante se deriva del rol de Authoriza: `adminShotra` = PRO, `userShotra` = FREE
+  (se sincroniza en `UserProfile.plan` al consultar el perfil).
+- Modelo escalable: hoy 1 regla por plan (rango 0..∞). Para tasas por rango de
+  monto, agregar más filas `CommissionRule` con `minAmount`/`maxAmount`. El motor
+  de cálculo no cambia.
 
-## 📚 API Endpoints
+### Devengo y facturación mensual acumulada
 
-### Autenticación
-- `GET /api/auth/profile` - Obtener perfil del usuario
-- `GET /api/auth/validate` - Validar token
-
-### Clientes
-- `GET /api/customers` - Listar clientes
-- `POST /api/customers` - Crear cliente
-- `GET /api/customers/:id` - Obtener cliente
-- `PATCH /api/customers/:id` - Actualizar cliente
-- `DELETE /api/customers/:id` - Eliminar cliente
-
-### Productos
-- `GET /api/products` - Listar productos
-- `POST /api/products` - Crear producto
-- `GET /api/products/:id` - Obtener producto
-- `PATCH /api/products/:id` - Actualizar producto
-- `DELETE /api/products/:id` - Eliminar producto
-
-### Facturas
-- `GET /api/invoices` - Listar facturas
-- `POST /api/invoices` - Crear factura
-- `GET /api/invoices/:id` - Obtener factura
-- `PATCH /api/invoices/:id` - Actualizar factura
-- `DELETE /api/invoices/:id` - Eliminar factura
-
-## 🗄️ Estructura de la base de datos
-
-### Esquema: `billing`
-
-**Tablas principales:**
-- `customers` - Información de clientes
-- `products` - Catálogo de productos
-- `invoices` - Facturas emitidas
-- `invoice_items` - Detalles de facturas
-
-## 🔗 Integración con Frontend
-
-El backend está configurado para conectarse con Frontend_Factonet en:
-- **Desarrollo:** `http://localhost:4202`
-- **CORS habilitado** para desarrollo
-
-## 📝 Scripts disponibles
-
-```bash
-npm run start:dev    # Desarrollo con hot reload
-npm run build        # Compilar aplicación
-npm run start:prod   # Producción
-npm run lint         # Verificar código
-npm run test         # Pruebas unitarias
-```
-
-## 🏗️ Arquitectura del sistema
+No se factura por servicio (una factura de $300 no es operativa). Las comisiones
+se **acumulan** y se facturan una vez al mes por ofertante.
 
 ```
-Frontend_Factonet (Angular) → Backend_Factonet (NestJS) → Backend_Authoriza (Auth)
-                                      ↓
-                              PostgreSQL (FactonetDB)
+Contrato COMPLETED (ambas partes confirman)
+   -> CommissionCharge { status: ACCRUED, periodKey: 'YYYY-MM' }
+        │  (se acumula)
+        ▼
+Corte mensual (día 1 del próximo mes − 5 días, ~día 26)
+   -> por ofertante: suma de cargos ACCRUED del periodo
+        ├─ total >= $12.000  -> factura acumulada en Authoriza + charges INVOICED
+        └─ total <  $12.000  -> se difiere al siguiente mes (sigue ACCRUED)
+        ▼
+Authoriza gestiona el ciclo de vida (payDay=1, vence +7, mora, suspensión).
+Impago a payDay+20 -> Authoriza cancela el contrato y suspende al ofertante.
+        ▼
+Conciliación (polling cada 2h a GET /api/invoices/:id): Paid -> charges PAID
 ```
 
-## 📄 Licencia
+- **Umbral de facturación**: `$12.000` acumulados.
+- **Contrato de comisiones**: se crea *lazy* en Authoriza (paquete `SHOTRA COMISIONES`,
+  `isBillable: true`, `MONTHLY`, `payday: 1`) la primera vez que un ofertante
+  supera el umbral. Se guarda su id en `UserProfile.authorizaCommissionContractId`.
+- **Webhook**: aún no existe en FactoNet/Authoriza. Se usa polling; cuando el
+  webhook exista, reemplaza a `reconcilePayments` sin tocar el resto.
 
-Privada - Derechos reservados Cyclonet
+### Estado de cuenta
+
+`GET /commissions/statement` → `{ currentPeriodKey, accruedTotal, invoicedTotal,
+paidTotal, billingThreshold, charges[] }`. El frontend lo muestra en
+`app/account-statement.tsx` (accesible desde Perfil).
+
+---
+
+## Finalización en doble vía + declaración de pago
+
+El dinero del servicio **no pasa por la app** (no hay custodia). Para dar
+trazabilidad sin entrar en regulación financiera, el cierre requiere que **ambas
+partes confirmen** y se registra una **declaración de pago**.
+
+```
+IN_PROGRESS / SIGNED
+   │  ofertante: PATCH /contracts/:id/deliver
+   ▼
+PENDING_CONFIRMATION
+   │  solicitante: PATCH /contracts/:id/confirm  (método de pago + comprobante/nota opcional)
+   ▼
+COMPLETED  -> aquí (y solo aquí) se devenga la comisión
+```
+
+- `PaymentDeclaration`: método (`CASH | TRANSFER | NEQUI | DAVIPLATA | PSE | OTHER`),
+  monto (por defecto `agreedPrice`), comprobante opcional (URL) y nota.
+- No es prueba de custodia; es **evidencia declarativa** para mediar disputas.
+
+---
+
+## Variables de entorno relevantes
+
+| Variable | Descripción |
+|----------|-------------|
+| `DATABASE_URL` | Postgres staging vía túnel (puerto 5433) |
+| `AUTHORIZA_API_URL` | Base de Authoriza (ej. `http://localhost:3000`); las rutas cuelgan de `/api` |
+| `AUTHORIZA_JWT_SECRET` | Misma clave que Authoriza para validar los JWT del ecosistema |
+| `AUTHORIZA_SHOTRA_COMMISSION_PACKAGE_ID` | Id del paquete `SHOTRA COMISIONES` en Authoriza (para crear el contrato de comisiones) |
+
+---
+
+## Checklist de despliegue de comisiones
+
+1. **Shotra**: túnel arriba → `npx prisma migrate dev` + `npx prisma db seed`
+   (crea reglas de comisión FREE/PRO).
+2. **Authoriza**: re-ejecutar el seed de paquetes SHOTRA para crear
+   `SHOTRA COMISIONES`.
+3. Copiar el id de ese paquete a `AUTHORIZA_SHOTRA_COMMISSION_PACKAGE_ID` en el
+   `.env` de Shotra.
+4. Reiniciar el backend de Shotra.
+
+---
+
+## Notas de arquitectura
+
+- **Fase 1 (actual)**: comisión facturada vía Authoriza, pago del servicio por
+  fuera con declaración. Sin pasarela ni custodia.
+- **Fase 2 (futuro)**: escrow/split payments con un PSP licenciado
+  (Wompi/Mercado Pago) y cuenta empresarial; el PSP custodia, no SHOTRA. El
+  webhook de confirmación reemplazará el polling.
