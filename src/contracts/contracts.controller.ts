@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Patch, Param } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Param, Body } from '@nestjs/common';
 import { ContractsService } from './contracts.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { ConfirmReceiptDto } from './dto/confirm-receipt.dto';
 
 @Controller('contracts')
 export class ContractsController {
@@ -30,9 +31,19 @@ export class ContractsController {
     return this.contractsService.sign(user.userId, id);
   }
 
-  /** Marcar servicio como completado */
-  @Patch(':id/complete')
-  markCompleted(@CurrentUser() user: any, @Param('id') id: string) {
-    return this.contractsService.markCompleted(user.userId, id);
+  /** Paso 1 (ofertante): marcar el servicio como entregado */
+  @Patch(':id/deliver')
+  markDelivered(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.contractsService.markDelivered(user.userId, id);
+  }
+
+  /** Paso 2 (solicitante): confirmar recepción + declarar el pago */
+  @Patch(':id/confirm')
+  confirmReceipt(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: ConfirmReceiptDto,
+  ) {
+    return this.contractsService.confirmReceipt(user.userId, id, dto);
   }
 }

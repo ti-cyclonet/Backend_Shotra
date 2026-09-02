@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class RatingsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /** Crear una evaluación (doble vía: solicitante evalúa ofertante y viceversa) */
   async create(userId: string, dto: CreateRatingDto) {
@@ -54,6 +58,16 @@ export class RatingsService {
     await this.prisma.userProfile.update({
       where: { id: targetId },
       data: { averageRating: Math.round(avgScore * 10) / 10, totalRatings: allRatings.length },
+    });
+
+    // Notificar a quien recibió la evaluación
+    await this.notifications.notify({
+      profileId: targetId,
+      type: 'NEW_RATING',
+      title: 'Recibiste una evaluación',
+      body: `${profile.displayName} te calificó con ${dto.score} estrella(s).`,
+      entityType: 'contract',
+      entityId: dto.contractId,
     });
 
     // Si ambos evaluaron, marcar el contrato como EVALUATED

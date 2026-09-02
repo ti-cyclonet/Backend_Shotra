@@ -6,7 +6,10 @@ import { CreateProfileDto, UpdateProfileDto, AddSkillDto } from './dto/create-pr
 export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findOrCreateProfile(userId: string, email: string) {
+  async findOrCreateProfile(userId: string, email: string, rol?: string) {
+    // Derivar el plan del rol de Authoriza: adminShotra=PRO, userShotra=FREE
+    const planFromRole = rol === 'adminShotra' ? 'PRO' : 'FREE';
+
     let profile = await this.prisma.userProfile.findUnique({
       where: { authorizaUserId: userId },
       include: { skills: { include: { category: true } }, portfolio: true },
@@ -18,7 +21,15 @@ export class ProfilesService {
           authorizaUserId: userId,
           email,
           displayName: email.split('@')[0],
+          plan: planFromRole,
         },
+        include: { skills: { include: { category: true } }, portfolio: true },
+      });
+    } else if (rol && profile.plan !== planFromRole) {
+      // Mantener el plan sincronizado con el rol vigente en Authoriza
+      profile = await this.prisma.userProfile.update({
+        where: { id: profile.id },
+        data: { plan: planFromRole },
         include: { skills: { include: { category: true } }, portfolio: true },
       });
     }

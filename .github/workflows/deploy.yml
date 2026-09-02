@@ -1,0 +1,32 @@
+name: Deploy Shotra API to EC2
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 3.95.90.144
+          username: ec2-user
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "📦 Pulling latest code..."
+            cd /opt/cyclonet/Shotra/Backend_Shotra
+            git pull origin master
+
+            echo "🔨 Building and deploying..."
+            cd /opt/cyclonet/deploy
+            docker-compose -f docker-compose.prod.yml build shotra-api
+            docker-compose -f docker-compose.prod.yml up -d shotra-api
+
+            echo "🗃️ Running database migrations..."
+            docker exec cyclonet-shotra-api npx prisma migrate deploy
+
+            echo "✅ Verifying..."
+            sleep 3
+            docker logs cyclonet-shotra-api --tail 10

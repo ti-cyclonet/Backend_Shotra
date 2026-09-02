@@ -3,6 +3,7 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { JwtStrategy } from './jwt.strategy';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { ShotraAccessGuard } from './guards/shotra-access.guard';
 
 @Module({
   imports: [
@@ -11,7 +12,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
       secret: process.env.AUTHORIZA_JWT_SECRET || process.env.JWT_SECRET || 'default',
     }),
   ],
-  providers: [JwtStrategy, JwtAuthGuard],
-  exports: [JwtAuthGuard, JwtModule],
+  providers: [JwtStrategy, JwtAuthGuard, ShotraAccessGuard],
+  exports: [JwtAuthGuard, ShotraAccessGuard, JwtModule],
 })
 export class AuthModule {}

@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProposalDto } from './dto/create-proposal.dto';
+import { ContractsService } from '../contracts/contracts.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 @Injectable()
 export class ProposalsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly contractsService: ContractsService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /** Enviar una propuesta/cotización a una solicitud */
   async create(userId: string, dto: CreateProposalDto) {
@@ -56,6 +62,16 @@ export class ProposalsService {
       });
     }
 
+    // Notificar al solicitante que recibió una propuesta
+    await this.notifications.notify({
+      profileId: request.requesterId,
+      type: 'NEW_PROPOSAL',
+      title: 'Nueva propuesta recibida',
+      body: `${profile.displayName} envió una propuesta por $${dto.price.toLocaleString()} a "${request.title}"`,
+      entityType: 'request',
+      entityId: request.id,
+    });
+
     return proposal;
   }
 
@@ -76,6 +92,12 @@ export class ProposalsService {
       throw new BadRequestException('Esta propuesta ya no está pendiente');
     }
 
+    // Otras propuestas pendientes que serán rechazadas (para notificar)
+    const otherPending = await this.prisma.proposal.findMany({
+      where: { requestId: proposal.requestId, id: { not: proposalId }, status: 'PENDING' },
+      select: { providerId: true },
+    });
+
     // Aceptar esta propuesta y rechazar las demás
     await this.prisma.$transaction([
       this.prisma.proposal.update({ where: { id: proposalId }, data: { status: 'ACCEPTED' } }),
@@ -89,7 +111,36 @@ export class ProposalsService {
       }),
     ]);
 
-    return { message: 'Propuesta aceptada. Se generará el contrato de servicio.' };
+    // Generar automáticamente el contrato de servicio
+    const contract = await this.contractsService.generateFromProposal(proposalId);
+
+    // Notificar al ofertante aceptado
+    await this.notifications.notify({
+      profileId: proposal.providerId,
+      type: 'PROPOSAL_ACCEPTED',
+      title: '¡Te aceptaron la propuesta!',
+      body: `Tu propuesta para "${proposal.request.title}" fue aceptada. Contrato ${contract.code} generado.`,
+      entityType: 'contract',
+      entityId: contract.id,
+    });
+
+    // Notificar a los ofertantes rechazados
+    for (const other of otherPending) {
+      await this.notifications.notify({
+        profileId: other.providerId,
+        type: 'PROPOSAL_REJECTED',
+        title: 'Propuesta no seleccionada',
+        body: `El solicitante eligió otra propuesta para "${proposal.request.title}".`,
+        entityType: 'request',
+        entityId: proposal.requestId,
+      });
+    }
+
+    return {
+      message: 'Propuesta aceptada. Contrato de servicio generado.',
+      contractId: contract.id,
+      contractCode: contract.code,
+    };
   }
 
   /** Rechazar una propuesta (solo el solicitante) */
@@ -106,10 +157,21 @@ export class ProposalsService {
       throw new BadRequestException('Solo el solicitante puede rechazar propuestas');
     }
 
-    return this.prisma.proposal.update({
+    const updated = await this.prisma.proposal.update({
       where: { id: proposalId },
       data: { status: 'REJECTED' },
     });
+
+    await this.notifications.notify({
+      profileId: proposal.providerId,
+      type: 'PROPOSAL_REJECTED',
+      title: 'Propuesta rechazada',
+      body: `Tu propuesta para "${proposal.request.title}" fue rechazada.`,
+      entityType: 'request',
+      entityId: proposal.requestId,
+    });
+
+    return updated;
   }
 
   /** Retirar mi propuesta (solo el ofertante) */
@@ -137,6 +199,7 @@ export class ProposalsService {
       where: { providerId: profile.id },
       include: {
         request: { include: { category: true, requester: { select: { displayName: true, city: true } } } },
+        contract: { select: { id: true, code: true, status: true } },
       },
       orderBy: { createdAt: 'desc' },
     });

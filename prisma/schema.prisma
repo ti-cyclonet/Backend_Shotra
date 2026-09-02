@@ -29,6 +29,14 @@ model UserProfile {
   // Configuración de ofertante
   isProvider      Boolean  @default(false) // si ofrece servicios
   isAvailable     Boolean  @default(false) // "Listo para ganar" (online/activo)
+
+  // Plan del ofertante en el ecosistema (deriva del rol de Authoriza).
+  // 'FREE' (userShotra) | 'PRO' (adminShotra). Define la tasa de comisión.
+  plan            String   @default("FREE")
+
+  // Facturación de comisiones (contrato dedicado en Authoriza, creado lazy)
+  authorizaCommissionContractId String? // id del contrato de comisiones en Authoriza
+  commissionCharges CommissionCharge[]
   
   // Métricas de reputación (calculadas)
   averageRating   Float    @default(0)
@@ -44,11 +52,43 @@ model UserProfile {
   ratingsReceived Rating[]          @relation("RatingTarget")
   messagesSent    Message[]
   portfolio       PortfolioItem[]
+  notifications   Notification[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@map("user_profiles")
+}
+
+// ─── Notificaciones (novedades para el usuario) ────────────────────────────────
+model Notification {
+  id          String   @id @default(uuid())
+  profileId   String
+  profile     UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  type        NotificationType
+  title       String
+  body        String
+  // Datos para navegación (ej. requestId, contractId)
+  entityType  String?  // 'request' | 'contract' | 'proposal'
+  entityId    String?
+
+  read        Boolean  @default(false)
+
+  createdAt   DateTime @default(now())
+
+  @@index([profileId, read])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  NEW_PROPOSAL       // recibiste una propuesta en tu solicitud
+  PROPOSAL_ACCEPTED  // te aceptaron una propuesta
+  PROPOSAL_REJECTED  // rechazaron tu propuesta
+  CONTRACT_SIGNED    // la otra parte firmo el contrato
+  CONTRACT_COMPLETED // el servicio fue marcado completado
+  NEW_RATING         // recibiste una evaluacion
+  NEW_MESSAGE        // nuevo mensaje
 }
 
 // ─── Habilidades del ofertante ─────────────────────────────────────────────────
@@ -205,6 +245,12 @@ model ServiceContract {
   requesterSignedAt DateTime?
   providerSignedAt  DateTime?
 
+  // Confirmación de finalización en doble vía:
+  // el ofertante marca "servicio entregado", el solicitante confirma "recibido y pagado".
+  // La comisión se devenga solo cuando AMBOS confirman.
+  providerCompletedAt  DateTime? // ofertante marcó entregado
+  requesterConfirmedAt DateTime? // solicitante confirmó recibido + pagado
+
   // Estado
   status          ContractStatus @default(PENDING)
   startedAt       DateTime?
@@ -213,6 +259,7 @@ model ServiceContract {
   // Evaluaciones
   ratings         Rating[]
   transaction     Transaction?
+  paymentDeclaration PaymentDeclaration?
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -221,12 +268,13 @@ model ServiceContract {
 }
 
 enum ContractStatus {
-  PENDING         // generado, pendiente de firmas
-  SIGNED          // ambos firmaron
-  IN_PROGRESS     // servicio en ejecución
-  COMPLETED       // servicio finalizado, pendiente de evaluación
-  EVALUATED       // ambas evaluaciones hechas
-  DISPUTED        // hay un conflicto
+  PENDING               // generado, pendiente de firmas
+  SIGNED                // ambos firmaron
+  IN_PROGRESS           // servicio en ejecución
+  PENDING_CONFIRMATION  // el ofertante marcó entregado; falta confirmación del solicitante
+  COMPLETED             // ambas partes confirmaron; servicio finalizado
+  EVALUATED             // ambas evaluaciones hechas
+  DISPUTED              // hay un conflicto
   CANCELLED
 }
 
@@ -304,4 +352,92 @@ enum TransactionStatus {
   INVOICED      // cuenta de cobro generada en FactoNet
   PAID
   REFUNDED
+}
+
+// ─── Declaración de pago del servicio (registro declarativo, sin custodia) ─────
+// El solicitante declara cómo pagó el servicio al ofertante (fuera de la app).
+// No es prueba de custodia; es evidencia para mediar disputas.
+model PaymentDeclaration {
+  id            String   @id @default(uuid())
+  contractId    String   @unique
+  contract      ServiceContract @relation(fields: [contractId], references: [id])
+
+  method        PaymentMethod
+  amount        Float    // monto declarado (normalmente = agreedPrice)
+  currency      String   @default("COP")
+  voucherUrl    String?  // comprobante opcional (imagen/soporte)
+  note          String?  // observación opcional
+
+  declaredById  String   // profileId de quien declara (el solicitante)
+
+  createdAt     DateTime @default(now())
+
+  @@map("payment_declarations")
+}
+
+enum PaymentMethod {
+  CASH          // efectivo
+  TRANSFER      // transferencia bancaria
+  NEQUI
+  DAVIPLATA
+  PSE
+  OTHER
+}
+
+// ─── Reglas de comisión (config escalable: por plan y por rango de monto) ──────
+// Hoy: 1 fila FREE (10%) + 1 fila PRO (5%), rango 0..∞.
+// Mañana: agregar filas con rangos de monto sin cambiar el motor de cálculo.
+model CommissionRule {
+  id          String   @id @default(uuid())
+  planKey     String   // 'FREE' | 'PRO'
+  minAmount   Float    @default(0)      // monto minimo del servicio (agreedPrice) al que aplica
+  maxAmount   Float?                    // null = sin tope superior
+  ratePercent Float                     // ej. 10 (FREE), 5 (PRO)
+  minFee      Float    @default(0)      // comision minima por contrato (0 = sin piso)
+  maxFee      Float?                    // tope de comision por contrato
+  priority    Int      @default(0)      // desempate cuando varias reglas aplican
+  active      Boolean  @default(true)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([planKey, active])
+  @@map("commission_rules")
+}
+
+// ─── Cargo de comisión por contrato (se acumula y se factura mensualmente) ─────
+model CommissionCharge {
+  id              String   @id @default(uuid())
+  contractId      String   @unique // un cargo por contrato
+  providerId      String
+  provider        UserProfile @relation(fields: [providerId], references: [id])
+
+  grossAmount     Float    // agreedPrice del contrato
+  ratePercent     Float    // tasa aplicada
+  commissionAmount Float   // comision calculada (con topes aplicados)
+  currency        String   @default("COP")
+
+  periodKey       String   // 'YYYY-MM' del mes de devengo (cuando se completo el contrato)
+
+  status          CommissionChargeStatus @default(ACCRUED)
+
+  // Cuando se factura: referencia a la factura acumulada en Authoriza
+  authorizaInvoiceId String?
+  invoicedPeriodKey  String? // 'YYYY-MM' del periodo en que se facturo (puede rodar)
+  invoicedAt         DateTime?
+  paidAt             DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([providerId, status])
+  @@index([status, periodKey])
+  @@map("commission_charges")
+}
+
+enum CommissionChargeStatus {
+  ACCRUED       // devengado, pendiente de facturar (se acumula)
+  INVOICED      // incluido en una factura mensual de Authoriza
+  PAID          // la factura fue pagada
+  WAIVED        // condonado / anulado
 }

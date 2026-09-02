@@ -119,6 +119,7 @@ export class RequestsService {
           },
           orderBy: { createdAt: 'asc' },
         },
+        contract: { select: { id: true, code: true, status: true } },
       },
     });
     if (!request) throw new NotFoundException('Solicitud no encontrada');

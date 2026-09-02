@@ -48,6 +48,32 @@ async function main() {
     }
   }
 
+  // ═══════ REGLAS DE COMISIÓN ═══════
+  // Modelo actual: tasa fija por plan (FREE 10%, PRO 5%), rango 0..∞,
+  // sin minFee (0) y tope maxFee $50.000 por contrato.
+  // Para escalar a rangos por monto, agregar más filas con min/maxAmount.
+  const commissionRules = [
+    { planKey: 'FREE', minAmount: 0, maxAmount: null, ratePercent: 10, minFee: 0, maxFee: 50000, priority: 0 },
+    { planKey: 'PRO', minAmount: 0, maxAmount: null, ratePercent: 5, minFee: 0, maxFee: 50000, priority: 0 },
+  ];
+
+  for (const rule of commissionRules) {
+    // Idempotente: buscar por planKey + rango base
+    const existing = await prisma.commissionRule.findFirst({
+      where: { planKey: rule.planKey, minAmount: rule.minAmount, maxAmount: rule.maxAmount },
+    });
+    if (!existing) {
+      await prisma.commissionRule.create({ data: rule });
+      console.log(`  ✅ Regla de comisión: ${rule.planKey} ${rule.ratePercent}% (maxFee ${rule.maxFee})`);
+    } else {
+      await prisma.commissionRule.update({
+        where: { id: existing.id },
+        data: { ratePercent: rule.ratePercent, minFee: rule.minFee, maxFee: rule.maxFee, active: true },
+      });
+      console.log(`  ⚠️ Regla de comisión ${rule.planKey} ya existe, actualizada`);
+    }
+  }
+
   console.log('\n✅ Seed completado');
 }
 

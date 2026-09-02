@@ -11,7 +11,7 @@ export class ProfilesController {
   /** Obtiene (o crea) el perfil del usuario autenticado */
   @Get('me')
   getMyProfile(@CurrentUser() user: any) {
-    return this.profilesService.findOrCreateProfile(user.userId, user.email);
+    return this.profilesService.findOrCreateProfile(user.userId, user.email, user.rol);
   }
 
   /** Actualizar mi perfil */
