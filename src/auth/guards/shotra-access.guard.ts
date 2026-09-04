@@ -35,10 +35,10 @@ export class ShotraAccessGuard implements CanActivate {
 
     if (!user?.userId) return false;
 
-    // Si el token tiene un rol de Shotra → acceso permitido.
-    // Si tiene un rol de OTRA app → bloquear (no puede usar token de InOut aquí).
-    // Si no tiene rol (token legacy) → permitir (fail-safe).
-    if (user.rol && !VALID_SHOTRA_ROLES.includes(user.rol)) {
+    // El token DEBE traer un rol de Shotra. Authoriza ya emite el rol en el JWT
+    // (login normal o con selección de contrato). Si el rol no es de Shotra
+    // (o falta), se rechaza: un token de otra app no habilita el acceso aquí.
+    if (!user.rol || !VALID_SHOTRA_ROLES.includes(user.rol)) {
       throw new ForbiddenException(
         'No tienes acceso a Shotra con este token. Inicia sesion en Shotra desde la aplicacion.',
       );
