@@ -45,6 +45,50 @@ export class ContractsService {
     });
   }
 
+  /**
+   * Registra la firma del SOLICITANTE por su profileId (usado al aceptar una
+   * propuesta: aceptar = firmar por parte del solicitante). Idempotente: si ya
+   * firmó, no hace nada. Si con esto ambas partes quedan firmadas, activa el
+   * contrato (SIGNED / en progreso). Best-effort: no rompe el flujo de aceptación.
+   */
+  async signAsRequester(requesterProfileId: string, contractId: string) {
+    try {
+      const contract = await this.prisma.serviceContract.findUnique({ where: { id: contractId } });
+      if (!contract || contract.requesterId !== requesterProfileId) return contract;
+      if (contract.requesterSignedAt) return contract; // ya firmado
+
+      const now = new Date();
+      const updated = await this.prisma.serviceContract.update({
+        where: { id: contractId },
+        data: { requesterSignedAt: now },
+      });
+
+      // Si el ofertante ya había firmado, el contrato queda activo.
+      if (updated.requesterSignedAt && updated.providerSignedAt) {
+        const signed = await this.prisma.serviceContract.update({
+          where: { id: contractId },
+          data: { status: 'SIGNED', startedAt: now },
+        });
+        for (const pid of [contract.requesterId, contract.providerId]) {
+          await this.notifications.notify({
+            profileId: pid,
+            type: 'CONTRACT_SIGNED',
+            title: 'Contrato activo',
+            body: `El contrato ${contract.code} quedó firmado por ambas partes. El servicio está en progreso.`,
+            entityType: 'contract',
+            entityId: contractId,
+          });
+        }
+        return signed;
+      }
+
+      return updated;
+    } catch (err) {
+      console.error('[ContractsService] signAsRequester failed:', err);
+      return null;
+    }
+  }
+
   /** Firmar contrato (ambas partes) */
   async sign(userId: string, contractId: string) {
     const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
@@ -191,6 +235,12 @@ export class ContractsService {
         completedAt: now,
       },
     });
+
+    // Propagar el avance al ServiceRequest: el trabajo quedó completado.
+    await this.prisma.serviceRequest.update({
+      where: { id: contract.requestId },
+      data: { status: 'COMPLETED' },
+    }).catch(() => undefined);
 
     // Devengar la comisión SOLO ahora que ambas partes confirmaron.
     await this.accrueCommissionForContract(contract, completed.completedAt ?? now);

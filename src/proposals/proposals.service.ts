@@ -114,12 +114,17 @@ export class ProposalsService {
     // Generar automáticamente el contrato de servicio
     const contract = await this.contractsService.generateFromProposal(proposalId);
 
+    // El acto de ACEPTAR la propuesta ES el compromiso del solicitante, así que
+    // se registra automáticamente SU firma (no requiere un paso "firmar" aparte).
+    // Si el ofertante ya había firmado, el contrato queda SIGNED/en progreso.
+    const signedContract = await this.contractsService.signAsRequester(profile.id, contract.id);
+
     // Notificar al ofertante aceptado
     await this.notifications.notify({
       profileId: proposal.providerId,
       type: 'PROPOSAL_ACCEPTED',
       title: '¡Te aceptaron la propuesta!',
-      body: `Tu propuesta para "${proposal.request.title}" fue aceptada. Contrato ${contract.code} generado.`,
+      body: `Tu propuesta para "${proposal.request.title}" fue aceptada. Contrato ${contract.code} generado${signedContract?.status === 'SIGNED' ? ' y firmado' : ''}.`,
       entityType: 'contract',
       entityId: contract.id,
     });

@@ -14,7 +14,9 @@ async function bootstrap() {
         'http://localhost:8081', // Expo dev
         'http://localhost:19006', // Expo web
         'http://localhost:3000',
+        'http://localhost:4201', // InOut dev (Angular) — publica solicitudes de domicilio
         'https://shotra.cyclonet.com.co',
+        'https://inout.cyclonet.com.co', // InOut prod — canal de demanda hacia Shotra
       ],
       credentials: true,
       methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',

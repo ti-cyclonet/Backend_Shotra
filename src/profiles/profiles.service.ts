@@ -6,32 +6,86 @@ import { CreateProfileDto, UpdateProfileDto, AddSkillDto } from './dto/create-pr
 export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findOrCreateProfile(userId: string, email: string, rol?: string) {
+  async findOrCreateProfile(userId: string, email: string, rol?: string, avatarFromAuthoriza?: string) {
     // Derivar el plan del rol de Authoriza: adminShotra=PRO, userShotra=FREE
     const planFromRole = rol === 'adminShotra' ? 'PRO' : 'FREE';
 
+    // El avatar VIVE en Authoriza (identidad central). Solo sincronizamos si viene
+    // una URL real (no el fallback ui-avatars generado por iniciales).
+    const authorizaAvatar =
+      avatarFromAuthoriza && !avatarFromAuthoriza.includes('ui-avatars.com')
+        ? avatarFromAuthoriza
+        : null;
+
+    const includeRel = { skills: { include: { category: true } }, portfolio: true };
+
     let profile = await this.prisma.userProfile.findUnique({
       where: { authorizaUserId: userId },
-      include: { skills: { include: { category: true } }, portfolio: true },
+      include: includeRel,
     });
 
+    // Fallback por email: el email también es único. Si ya existe un perfil con
+    // este correo pero ligado a OTRO authorizaUserId (p. ej. la identidad de
+    // Authoriza cambió al recrear la BD, o el usuario entró antes por otro flujo),
+    // reusamos ese perfil y sincronizamos su authorizaUserId al vigente. Esto
+    // evita el "Unique constraint failed on email" al intentar recrearlo.
     if (!profile) {
-      profile = await this.prisma.userProfile.create({
-        data: {
-          authorizaUserId: userId,
-          email,
-          displayName: email.split('@')[0],
-          plan: planFromRole,
-        },
-        include: { skills: { include: { category: true } }, portfolio: true },
+      const byEmail = await this.prisma.userProfile.findUnique({
+        where: { email },
+        include: includeRel,
       });
-    } else if (rol && profile.plan !== planFromRole) {
-      // Mantener el plan sincronizado con el rol vigente en Authoriza
-      profile = await this.prisma.userProfile.update({
-        where: { id: profile.id },
-        data: { plan: planFromRole },
-        include: { skills: { include: { category: true } }, portfolio: true },
-      });
+      if (byEmail) {
+        profile =
+          byEmail.authorizaUserId !== userId
+            ? await this.prisma.userProfile.update({
+                where: { id: byEmail.id },
+                data: { authorizaUserId: userId },
+                include: includeRel,
+              })
+            : byEmail;
+      }
+    }
+
+    if (!profile) {
+      try {
+        profile = await this.prisma.userProfile.create({
+          data: {
+            authorizaUserId: userId,
+            email,
+            displayName: email.split('@')[0],
+            plan: planFromRole,
+            ...(authorizaAvatar ? { avatarUrl: authorizaAvatar } : {}),
+          },
+          include: includeRel,
+        });
+      } catch (err: any) {
+        // Carrera concurrente: otra petición creó el perfil entre el find y el
+        // create (dos requests casi simultáneos). Recuperamos el existente.
+        if (err?.code === 'P2002') {
+          profile =
+            (await this.prisma.userProfile.findUnique({
+              where: { authorizaUserId: userId },
+              include: includeRel,
+            })) ||
+            (await this.prisma.userProfile.findUnique({
+              where: { email },
+              include: includeRel,
+            }));
+        }
+        if (!profile) throw err;
+      }
+    } else {
+      // Sincronizar con Authoriza: plan (según rol vigente) y avatar centralizado.
+      const patch: any = {};
+      if (rol && profile.plan !== planFromRole) patch.plan = planFromRole;
+      if (authorizaAvatar && profile.avatarUrl !== authorizaAvatar) patch.avatarUrl = authorizaAvatar;
+      if (Object.keys(patch).length > 0) {
+        profile = await this.prisma.userProfile.update({
+          where: { id: profile.id },
+          data: patch,
+          include: includeRel,
+        });
+      }
     }
 
     return profile;

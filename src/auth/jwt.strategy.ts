@@ -28,6 +28,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       email: payload.email || payload.username,
       rol: payload.rol,
       tenantId: payload.tenantId,
+      image: (payload as any).image, // avatar centralizado de Authoriza
     };
   }
 }

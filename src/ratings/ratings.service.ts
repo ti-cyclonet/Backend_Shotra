@@ -78,6 +78,12 @@ export class RatingsService {
         data: { status: 'EVALUATED' },
       });
 
+      // Propagar al ServiceRequest: ciclo finalizado (ambos evaluaron).
+      await this.prisma.serviceRequest.update({
+        where: { id: contract.requestId },
+        data: { status: 'EVALUATED' },
+      }).catch(() => undefined);
+
       // Incrementar completedJobs del proveedor
       await this.prisma.userProfile.update({
         where: { id: contract.providerId },
