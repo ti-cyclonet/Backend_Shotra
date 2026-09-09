@@ -48,7 +48,12 @@ export class RequestsService {
 
   /** Listar solicitudes publicadas (para ofertantes) — filtradas por categoría y cercanía */
   async findPublished(filters: { categorySlug?: string; lat?: number; lng?: number; radiusKm?: number }) {
-    const where: any = { status: 'PUBLISHED' };
+    // El feed "Explorar servicios" solo muestra solicitudes ABIERTAS (que aún
+    // aceptan propuestas): PUBLISHED (sin ofertas aún) e IN_PROPOSALS (ya con
+    // ofertas, pero abierta). Se EXCLUYEN las que ya no reciben ofertas:
+    // ACCEPTED, IN_PROGRESS, PENDING_CONFIRMATION, COMPLETED, EVALUATED,
+    // CANCELLED, EXPIRED, DRAFT.
+    const where: any = { status: { in: ['PUBLISHED', 'IN_PROPOSALS'] } };
 
     if (filters.categorySlug) {
       where.category = { slug: filters.categorySlug };
@@ -101,6 +106,10 @@ export class RequestsService {
       include: {
         category: true,
         _count: { select: { proposals: true } },
+        // Incluir el contrato (si existe) para que el cliente pueda mostrar el
+        // estado REAL del ciclo (firmado, completado, evaluado) aunque el
+        // request.status vaya un paso atrás.
+        contract: { select: { id: true, code: true, status: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
