@@ -39,6 +39,44 @@ NestJS + Prisma + PostgreSQL/PostGIS. Puerto `4100`.
 
 ---
 
+## Migrar / seedear producción (contenedor Docker en EC2)
+
+Conexión: `ssh -i C:\Users\AlfredoMamby\cyclonet-ec2-key.pem ec2-user@3.95.90.144`.
+
+```bash
+docker exec cyclonet-shotra-api npx prisma migrate deploy   # aplica migraciones pendientes
+docker exec cyclonet-shotra-api npx prisma migrate status   # confirma "up to date"
+```
+
+> ⚠️ **`npx prisma db seed` NO funciona tal cual dentro del contenedor de
+> producción.** El `Dockerfile` no copia `tsconfig.json` a la imagen final (solo
+> `dist`, `node_modules`, `package*.json` y `prisma`), así que `ts-node` no
+> encuentra el tsconfig del proyecto y cae a defaults (`module: NodeNext` sin
+> `moduleResolution` a juego), lo que revienta con `TS5109` o con
+> `ERR_UNKNOWN_FILE_EXTENSION ".ts"` según la variante del comando.
+>
+> Workaround que sí funciona (fuerza las compiler options del seed sin
+> depender del tsconfig):
+>
+> ```bash
+> docker exec cyclonet-shotra-api sh -c 'TS_NODE_COMPILER_OPTIONS="{\"module\":\"commonjs\",\"moduleResolution\":\"node\"}" npx ts-node --transpile-only prisma/seed.ts'
+> ```
+>
+> `npm run seed` tampoco existe — el seed está declarado bajo la clave
+> `"prisma": { "seed": ... }` de `package.json`, no en `"scripts"`.
+>
+> Fix de raíz pendiente: agregar `COPY --from=builder /app/tsconfig.json
+> ./tsconfig.json` al `Dockerfile` para que `prisma db seed` funcione normal
+> en el próximo build/deploy.
+
+**Contexto del incidente (2026-09-14):** un reset de las bases de producción
+dejó `ShotraDB` vacía (0/3 migraciones aplicadas) → 500s en toda la app y
+"tabla no existe" en logs. Tras `migrate deploy` las tablas quedaron creadas
+pero vacías, por lo que las categorías no cargaban en la app hasta correr el
+seed con el workaround de arriba.
+
+---
+
 ## Sistema de comisiones (monetización)
 
 SHOTRA cobra una **comisión de intermediación al ofertante** por cada servicio
