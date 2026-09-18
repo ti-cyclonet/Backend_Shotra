@@ -138,6 +138,11 @@ model ServiceCategory {
   isActive    Boolean  @default(true)
   order       Int      @default(0)
 
+  // Si la categoría implica trayecto (origen → destino, ej. domicilios),
+  // el cliente muestra el mapa de ruta al publicar. Categorías de otro
+  // sector (ej. reparaciones a domicilio) dejan esto en false: un solo punto.
+  requiresRoute Boolean @default(false)
+
   skills      ProviderSkill[]
   requests    ServiceRequest[]
 
@@ -160,11 +165,18 @@ model ServiceRequest {
   budgetMax       Float?
   currency        String   @default("COP")
 
-  // Ubicación del servicio
+  // Ubicación del servicio (destino: dónde se entrega/ejecuta)
   latitude        Float?
   longitude       Float?
   address         String?
   isRemote        Boolean  @default(false) // si puede ser a distancia
+
+  // Origen del trayecto (opcional; solo aplica a categorías con requiresRoute,
+  // ej. domicilios: punto de recogida). Si no se envía, la solicitud es de
+  // un solo punto (el destino), igual que antes.
+  originLatitude  Float?
+  originLongitude Float?
+  originAddress   String?
 
   // Temporalidad
   scheduledAt     DateTime?  // cuándo se necesita el servicio

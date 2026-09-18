@@ -7,21 +7,26 @@ async function main() {
 
   // ═══════ CATEGORÍAS DE SERVICIO — Sector DELIVERY ═══════
   // Empezamos solo con delivery; se escala después a demanda.
+  // requiresRoute: true en todo el sector Delivery — son servicios de
+  // trayecto (recogida → entrega), así que el cliente debe mostrar el mapa
+  // de ruta. Sectores futuros (ej. reparaciones a domicilio) lo dejarán en
+  // false (default): un solo punto, sin mapa de ruta.
   const deliveryCategories = [
     {
       name: 'Delivery',
       slug: 'delivery',
       icon: 'truck',
       description: 'Servicios de entrega, domicilios y transporte de paquetes',
+      requiresRoute: true,
       children: [
-        { name: 'Domicilios de comida', slug: 'food-delivery', icon: 'utensils', description: 'Entrega de alimentos y restaurantes' },
-        { name: 'Paquetería express', slug: 'express-packages', icon: 'package', description: 'Envío rápido de paquetes pequeños dentro de la ciudad' },
-        { name: 'Mensajería', slug: 'messenger', icon: 'mail', description: 'Entrega de documentos, sobres y correspondencia' },
-        { name: 'Compras y mandados', slug: 'errands', icon: 'shopping-bag', description: 'Hacer compras por ti y entregártelas' },
-        { name: 'Mudanzas pequeñas', slug: 'small-moves', icon: 'box', description: 'Transporte de objetos medianos y mudanzas de pocas piezas' },
-        { name: 'Transporte de mascotas', slug: 'pet-transport', icon: 'paw', description: 'Traslado seguro de mascotas a veterinario, guardería, etc.' },
-        { name: 'Entrega de mercado', slug: 'grocery-delivery', icon: 'shopping-cart', description: 'Entrega de mercado y supermercado a domicilio' },
-        { name: 'Recogida y entrega de prendas', slug: 'laundry-delivery', icon: 'shirt', description: 'Recoger y entregar ropa de lavandería/tintorería' },
+        { name: 'Domicilios de comida', slug: 'food-delivery', icon: 'utensils', description: 'Entrega de alimentos y restaurantes', requiresRoute: true },
+        { name: 'Paquetería express', slug: 'express-packages', icon: 'package', description: 'Envío rápido de paquetes pequeños dentro de la ciudad', requiresRoute: true },
+        { name: 'Mensajería', slug: 'messenger', icon: 'mail', description: 'Entrega de documentos, sobres y correspondencia', requiresRoute: true },
+        { name: 'Compras y mandados', slug: 'errands', icon: 'shopping-bag', description: 'Hacer compras por ti y entregártelas', requiresRoute: true },
+        { name: 'Mudanzas pequeñas', slug: 'small-moves', icon: 'box', description: 'Transporte de objetos medianos y mudanzas de pocas piezas', requiresRoute: true },
+        { name: 'Transporte de mascotas', slug: 'pet-transport', icon: 'paw', description: 'Traslado seguro de mascotas a veterinario, guardería, etc.', requiresRoute: true },
+        { name: 'Entrega de mercado', slug: 'grocery-delivery', icon: 'shopping-cart', description: 'Entrega de mercado y supermercado a domicilio', requiresRoute: true },
+        { name: 'Recogida y entrega de prendas', slug: 'laundry-delivery', icon: 'shirt', description: 'Recoger y entregar ropa de lavandería/tintorería', requiresRoute: true },
       ],
     },
   ];

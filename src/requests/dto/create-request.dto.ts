@@ -30,6 +30,20 @@ export class CreateRequestDto {
   @IsString()
   address?: string;
 
+  // Origen del trayecto (recogida). Solo aplica a categorías con
+  // requiresRoute (ej. domicilios); en otras categorías se ignora.
+  @IsOptional()
+  @IsNumber()
+  originLatitude?: number;
+
+  @IsOptional()
+  @IsNumber()
+  originLongitude?: number;
+
+  @IsOptional()
+  @IsString()
+  originAddress?: string;
+
   @IsOptional()
   @IsBoolean()
   isRemote?: boolean;
