@@ -6,23 +6,35 @@ import { SendMessageDto } from './dto/send-message.dto';
 export class MessagingService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * El chat solo se habilita una vez la propuesta fue aceptada y AMBAS partes
+   * firmaron el contrato de servicio (requesterSignedAt y providerSignedAt).
+   * Antes de eso (propuesta pendiente, o contrato generado pero sin firmar)
+   * no hay conversación: evita que un ofertante le escriba al solicitante
+   * antes de que este acepte su propuesta.
+   */
+  private async assertSignedContractAccess(requestId: string, profileId: string) {
+    const contract = await this.prisma.serviceContract.findUnique({ where: { requestId } });
+    if (!contract || !contract.requesterSignedAt || !contract.providerSignedAt) {
+      throw new BadRequestException(
+        'El chat se activa cuando la propuesta es aceptada y ambas partes firman el contrato.',
+      );
+    }
+    const isParty = contract.requesterId === profileId || contract.providerId === profileId;
+    if (!isParty) {
+      throw new BadRequestException('No tienes acceso a esta conversación');
+    }
+  }
+
   /** Enviar un mensaje en el contexto de una solicitud */
   async sendMessage(userId: string, dto: SendMessageDto) {
     const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
     if (!profile) throw new NotFoundException('Perfil no encontrado');
 
-    // Verificar que la solicitud existe
     const request = await this.prisma.serviceRequest.findUnique({ where: { id: dto.requestId } });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
 
-    // Verificar que el usuario es parte de la conversación (solicitante o un ofertante con propuesta)
-    const isRequester = request.requesterId === profile.id;
-    const hasProposal = await this.prisma.proposal.findFirst({
-      where: { requestId: dto.requestId, providerId: profile.id },
-    });
-    if (!isRequester && !hasProposal) {
-      throw new BadRequestException('No tienes acceso a esta conversación');
-    }
+    await this.assertSignedContractAccess(dto.requestId, profile.id);
 
     return this.prisma.message.create({
       data: {
@@ -40,17 +52,10 @@ export class MessagingService {
     const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
     if (!profile) throw new NotFoundException('Perfil no encontrado');
 
-    // Verificar acceso
     const request = await this.prisma.serviceRequest.findUnique({ where: { id: requestId } });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
 
-    const isRequester = request.requesterId === profile.id;
-    const hasProposal = await this.prisma.proposal.findFirst({
-      where: { requestId, providerId: profile.id },
-    });
-    if (!isRequester && !hasProposal) {
-      throw new BadRequestException('No tienes acceso a esta conversación');
-    }
+    await this.assertSignedContractAccess(requestId, profile.id);
 
     // Marcar mensajes como leídos (los que no son míos)
     await this.prisma.message.updateMany({
@@ -70,21 +75,18 @@ export class MessagingService {
     const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
     if (!profile) return [];
 
-    // Solicitudes donde soy requester o tengo propuesta
-    const myRequests = await this.prisma.serviceRequest.findMany({
-      where: { requesterId: profile.id, messages: { some: {} } },
-      select: { id: true, title: true, status: true },
+    // Solo solicitudes con contrato firmado por ambas partes (ahí es donde el
+    // chat está habilitado), donde soy el solicitante o el ofertante.
+    const signedContracts = await this.prisma.serviceContract.findMany({
+      where: {
+        OR: [{ requesterId: profile.id }, { providerId: profile.id }],
+        requesterSignedAt: { not: null },
+        providerSignedAt: { not: null },
+      },
+      select: { requestId: true },
     });
 
-    const myProposalRequests = await this.prisma.proposal.findMany({
-      where: { providerId: profile.id },
-      select: { request: { select: { id: true, title: true, status: true } } },
-    });
-
-    const allRequestIds = new Set([
-      ...myRequests.map((r) => r.id),
-      ...myProposalRequests.map((p) => p.request.id),
-    ]);
+    const allRequestIds = new Set(signedContracts.map((c) => c.requestId));
 
     // Para cada conversación, obtener último mensaje y count no leídos
     const conversations: { requestId: string; lastMessage: any; unreadCount: number }[] = [];
