@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { SendMessageDto } from './dto/send-message.dto';
 
 @Injectable()
 export class MessagingService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /**
    * El chat solo se habilita una vez la propuesta fue aceptada y AMBAS partes
@@ -24,6 +28,7 @@ export class MessagingService {
     if (!isParty) {
       throw new BadRequestException('No tienes acceso a esta conversación');
     }
+    return contract;
   }
 
   /** Enviar un mensaje en el contexto de una solicitud */
@@ -34,9 +39,9 @@ export class MessagingService {
     const request = await this.prisma.serviceRequest.findUnique({ where: { id: dto.requestId } });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
 
-    await this.assertSignedContractAccess(dto.requestId, profile.id);
+    const contract = await this.assertSignedContractAccess(dto.requestId, profile.id);
 
-    return this.prisma.message.create({
+    const message = await this.prisma.message.create({
       data: {
         requestId: dto.requestId,
         senderId: profile.id,
@@ -45,6 +50,21 @@ export class MessagingService {
       },
       include: { sender: { select: { displayName: true, avatarUrl: true } } },
     });
+
+    // Notificar a la OTRA parte (banner + sonido, vía NotificationsContext del
+    // cliente): quien no envió el mensaje. entityType 'chat' lleva directo a
+    // la conversación en vez del detalle de la solicitud.
+    const otherPartyId = contract.requesterId === profile.id ? contract.providerId : contract.requesterId;
+    await this.notifications.notify({
+      profileId: otherPartyId,
+      type: 'NEW_MESSAGE',
+      title: message.sender?.displayName || 'Nuevo mensaje',
+      body: dto.content.length > 120 ? `${dto.content.slice(0, 117)}...` : dto.content,
+      entityType: 'chat',
+      entityId: dto.requestId,
+    });
+
+    return message;
   }
 
   /** Obtener mensajes de una solicitud */
