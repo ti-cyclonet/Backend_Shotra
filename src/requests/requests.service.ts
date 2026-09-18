@@ -128,7 +128,10 @@ export class RequestsService {
           },
           orderBy: { createdAt: 'asc' },
         },
-        contract: { select: { id: true, code: true, status: true } },
+        // requesterSignedAt/providerSignedAt/providerId: el cliente los usa
+        // para saber si ya puede mostrar el botón de Chat (solo tras la firma
+        // de ambas partes) y si el usuario en sesión es el ofertante firmante.
+        contract: { select: { id: true, code: true, status: true, requesterSignedAt: true, providerSignedAt: true, providerId: true } },
       },
     });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
