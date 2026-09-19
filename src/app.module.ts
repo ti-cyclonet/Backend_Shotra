@@ -16,6 +16,7 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { CommissionsModule } from './commissions/commissions.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
+import { PushTokensModule } from './push-tokens/push-tokens.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { HealthModule } from './health/health.module';
     NotificationsModule,
     CommissionsModule,
     UploadsModule,
+    PushTokensModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

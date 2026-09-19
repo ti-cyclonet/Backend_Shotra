@@ -55,6 +55,7 @@ model UserProfile {
   messagesSent    Message[]
   portfolio       PortfolioItem[]
   notifications   Notification[]
+  pushTokens      PushToken[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -81,6 +82,25 @@ model Notification {
 
   @@index([profileId, read])
   @@map("notifications")
+}
+
+// ─── Tokens de push (Expo) por dispositivo ─────────────────────────────────────
+// Un perfil puede tener varios dispositivos registrados (token único por
+// dispositivo/instalación). Se usan para enviar push reales cuando se crea
+// una notificación, así llegan aunque la app esté minimizada o cerrada.
+model PushToken {
+  id        String   @id @default(uuid())
+  profileId String
+  profile   UserProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  token     String   @unique
+  platform  String?  // 'ios' | 'android' | 'web'
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([profileId])
+  @@map("push_tokens")
 }
 
 enum NotificationType {

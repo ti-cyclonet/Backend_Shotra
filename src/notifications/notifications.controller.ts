@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Param, Query } from '@nestjs/common';
+import { Controller, Get, Patch, Delete, Param, Query } from '@nestjs/common';
 import { NotificationsService } from './notifications.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
@@ -22,5 +22,11 @@ export class NotificationsController {
   @Patch('read-all')
   markAllRead(@CurrentUser() user: any) {
     return this.notificationsService.markAllRead(user.userId);
+  }
+
+  /** Vaciar (borrar) todas mis notificaciones */
+  @Delete()
+  clearAll(@CurrentUser() user: any) {
+    return this.notificationsService.clearAll(user.userId);
   }
 }
