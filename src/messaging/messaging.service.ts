@@ -16,6 +16,8 @@ export class MessagingService {
    * Antes de eso (propuesta pendiente, o contrato generado pero sin firmar)
    * no hay conversación: evita que un ofertante le escriba al solicitante
    * antes de que este acepte su propuesta.
+   * Una vez el trabajo se finaliza (COMPLETED/EVALUATED) el chat se cierra
+   * de nuevo, igual que en la UI (botón "Chat" deshabilitado).
    */
   private async assertSignedContractAccess(requestId: string, profileId: string) {
     const contract = await this.prisma.serviceContract.findUnique({ where: { requestId } });
@@ -27,6 +29,9 @@ export class MessagingService {
     const isParty = contract.requesterId === profileId || contract.providerId === profileId;
     if (!isParty) {
       throw new BadRequestException('No tienes acceso a esta conversación');
+    }
+    if (contract.status === 'COMPLETED' || contract.status === 'EVALUATED') {
+      throw new BadRequestException('Este chat ya no está disponible: el trabajo fue finalizado.');
     }
     return contract;
   }
@@ -103,13 +108,14 @@ export class MessagingService {
         requesterSignedAt: { not: null },
         providerSignedAt: { not: null },
       },
-      select: { requestId: true },
+      select: { requestId: true, status: true },
     });
 
+    const statusByRequestId = new Map(signedContracts.map((c) => [c.requestId, c.status]));
     const allRequestIds = new Set(signedContracts.map((c) => c.requestId));
 
     // Para cada conversación, obtener último mensaje y count no leídos
-    const conversations: { requestId: string; lastMessage: any; unreadCount: number }[] = [];
+    const conversations: { requestId: string; lastMessage: any; unreadCount: number; closed: boolean }[] = [];
     for (const requestId of allRequestIds) {
       const lastMessage = await this.prisma.message.findFirst({
         where: { requestId },
@@ -119,8 +125,10 @@ export class MessagingService {
       const unread = await this.prisma.message.count({
         where: { requestId, senderId: { not: profile.id }, readAt: null },
       });
+      const status = statusByRequestId.get(requestId);
+      const closed = status === 'COMPLETED' || status === 'EVALUATED';
       if (lastMessage) {
-        conversations.push({ requestId, lastMessage, unreadCount: unread });
+        conversations.push({ requestId, lastMessage, unreadCount: unread, closed });
       }
     }
 

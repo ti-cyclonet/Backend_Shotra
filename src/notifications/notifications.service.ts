@@ -63,18 +63,29 @@ export class NotificationsService {
    */
   private async sendPush(input: NotifyInput): Promise<void> {
     const tokens = await this.prisma.pushToken.findMany({ where: { profileId: input.profileId } });
-    if (tokens.length === 0) return;
+    if (tokens.length === 0) {
+      console.warn(`[NotificationsService] sendPush: no hay push tokens registrados para profile ${input.profileId}, se omite el push.`);
+      return;
+    }
 
     const unread = await this.prisma.notification.count({
       where: { profileId: input.profileId, read: false },
     });
 
+    // priority:'high' + channelId son clave en Android: sin ellos, FCM puede
+    // encolar el mensaje con prioridad normal y el sistema operativo lo
+    // difiere mientras el dispositivo está en Doze/App Standby, entregándolo
+    // recién cuando el usuario reabre la app (exactamente el síntoma
+    // reportado: "llega solo al abrir la app"). 'high' fuerza entrega
+    // inmediata, despertando el dispositivo si hace falta.
     const messages = tokens.map((t) => ({
       to: t.token,
       title: input.title,
       body: input.body,
       sound: 'default',
       badge: unread,
+      priority: 'high',
+      channelId: 'default',
       data: { entityType: input.entityType, entityId: input.entityId, notificationType: input.type },
     }));
 
@@ -87,11 +98,17 @@ export class NotificationsService {
       const data: any = await res.json().catch(() => null);
       const tickets: any[] = data?.data || [];
 
-      // Limpiar tokens que Expo marca como inválidos definitivamente.
+      // Limpiar tokens que Expo marca como inválidos definitivamente, y dejar
+      // rastro de cualquier otro error (credenciales FCM V1 mal configuradas,
+      // rate limiting, etc.) para poder diagnosticar vía logs del contenedor.
       const staleTokens: string[] = [];
       tickets.forEach((ticket, i) => {
-        if (ticket?.status === 'error' && ticket?.details?.error === 'DeviceNotRegistered') {
-          staleTokens.push(tokens[i].token);
+        if (ticket?.status === 'error') {
+          if (ticket?.details?.error === 'DeviceNotRegistered') {
+            staleTokens.push(tokens[i].token);
+          } else {
+            console.error(`[NotificationsService] Expo push ticket error para token ${tokens[i].token}:`, ticket);
+          }
         }
       });
       if (staleTokens.length > 0) {
