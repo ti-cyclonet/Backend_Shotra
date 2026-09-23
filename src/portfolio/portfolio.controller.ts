@@ -1,7 +1,8 @@
-import { Controller, Get, Post, Delete, Body, Param, UploadedFile, UseInterceptors } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, UploadedFile, UseInterceptors } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { PortfolioService } from './portfolio.service';
 import { CreatePortfolioItemDto } from './dto/create-portfolio-item.dto';
+import { UpdatePortfolioOfferDto } from './dto/update-portfolio-offer.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 
@@ -18,6 +19,16 @@ export class PortfolioController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.portfolioService.create(user.userId, dto, file);
+  }
+
+  /** Elegir (o quitar) una foto para mostrarse en mis ofertas (máx. 3 a la vez) */
+  @Patch(':id/offer')
+  setShowInOffer(
+    @CurrentUser() user: any,
+    @Param('id') id: string,
+    @Body() dto: UpdatePortfolioOfferDto,
+  ) {
+    return this.portfolioService.setShowInOffer(user.userId, id, dto);
   }
 
   /** Eliminar una foto de mi portafolio */

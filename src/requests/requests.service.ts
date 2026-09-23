@@ -127,7 +127,22 @@ export class RequestsService {
         requester: { select: { id: true, displayName: true, avatarUrl: true, averageRating: true, city: true } },
         proposals: {
           include: {
-            provider: { select: { id: true, displayName: true, avatarUrl: true, averageRating: true, completedJobs: true } },
+            provider: {
+              select: {
+                id: true,
+                displayName: true,
+                avatarUrl: true,
+                averageRating: true,
+                completedJobs: true,
+                // Solo las fotos que el ofertante eligió mostrar en su oferta (máx. 3)
+                portfolio: {
+                  where: { showInOffer: true },
+                  select: { id: true, imageUrl: true, title: true },
+                  take: 3,
+                  orderBy: { createdAt: 'desc' },
+                },
+              },
+            },
           },
           orderBy: { createdAt: 'asc' },
         },
