@@ -140,6 +140,10 @@ model PortfolioItem {
   imageUrl    String
   categoryId  String?
 
+  // Si el ofertante eligió mostrar esta foto en sus ofertas (máx. 3 a la vez,
+  // validado en el servicio). Puede tener hasta 10 fotos cargadas en total.
+  showInOffer Boolean  @default(false)
+
   createdAt   DateTime @default(now())
 
   @@map("portfolio_items")
