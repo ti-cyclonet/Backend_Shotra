@@ -248,6 +248,11 @@ model Proposal {
   
   status        ProposalStatus @default(PENDING)
 
+  // Hasta 3 fotos del portafolio del ofertante elegidas para ESTA oferta
+  // puntual (ids de PortfolioItem; se resuelven a nivel de servicio, no es
+  // una relación de Prisma porque no todo portafolio aplica a toda oferta).
+  imageIds      String[] @default([])
+
   contract      ServiceContract?
 
   createdAt     DateTime @default(now())

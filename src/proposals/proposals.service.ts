@@ -39,6 +39,18 @@ export class ProposalsService {
     });
     if (existing) throw new ConflictException('Ya enviaste una propuesta a esta solicitud');
 
+    // Las fotos elegidas para esta oferta deben ser del propio portafolio
+    // (nunca de otro ofertante), y no más de 3 (el DTO ya lo valida, esto es
+    // una segunda barrera contra ids ajenos).
+    let imageIds: string[] = [];
+    if (dto.imageIds?.length) {
+      const owned = await this.prisma.portfolioItem.findMany({
+        where: { id: { in: dto.imageIds }, profileId: profile.id },
+        select: { id: true },
+      });
+      imageIds = owned.map((i) => i.id).slice(0, 3);
+    }
+
     // Crear propuesta
     const proposal = await this.prisma.proposal.create({
       data: {
@@ -47,6 +59,7 @@ export class ProposalsService {
         price: dto.price,
         description: dto.description,
         estimatedTime: dto.estimatedTime,
+        imageIds,
         status: 'PENDING',
       },
       include: {

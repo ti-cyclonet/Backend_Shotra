@@ -128,20 +128,7 @@ export class RequestsService {
         proposals: {
           include: {
             provider: {
-              select: {
-                id: true,
-                displayName: true,
-                avatarUrl: true,
-                averageRating: true,
-                completedJobs: true,
-                // Solo las fotos que el ofertante eligió mostrar en su oferta (máx. 3)
-                portfolio: {
-                  where: { showInOffer: true },
-                  select: { id: true, imageUrl: true, title: true },
-                  take: 3,
-                  orderBy: { createdAt: 'desc' },
-                },
-              },
+              select: { id: true, displayName: true, avatarUrl: true, averageRating: true, completedJobs: true },
             },
           },
           orderBy: { createdAt: 'asc' },
@@ -153,6 +140,24 @@ export class RequestsService {
       },
     });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
+
+    // Resolver las fotos elegidas por cada propuesta (imageIds no es una
+    // relación de Prisma, así que se resuelven aparte en una sola consulta).
+    const allImageIds = [...new Set(request.proposals.flatMap((p) => p.imageIds || []))];
+    if (allImageIds.length > 0) {
+      const images = await this.prisma.portfolioItem.findMany({
+        where: { id: { in: allImageIds } },
+        select: { id: true, imageUrl: true, title: true },
+      });
+      const byId = new Map(images.map((img) => [img.id, img]));
+      (request as any).proposals = request.proposals.map((p) => ({
+        ...p,
+        images: (p.imageIds || []).map((id) => byId.get(id)).filter(Boolean),
+      }));
+    } else {
+      (request as any).proposals = request.proposals.map((p) => ({ ...p, images: [] }));
+    }
+
     return request;
   }
 
