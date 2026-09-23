@@ -108,14 +108,25 @@ export class MessagingService {
         requesterSignedAt: { not: null },
         providerSignedAt: { not: null },
       },
-      select: { requestId: true, status: true },
+      select: { requestId: true, status: true, requesterId: true, providerId: true },
     });
 
-    const statusByRequestId = new Map(signedContracts.map((c) => [c.requestId, c.status]));
+    const contractByRequestId = new Map(signedContracts.map((c) => [c.requestId, c]));
     const allRequestIds = new Set(signedContracts.map((c) => c.requestId));
 
+    // La conversación se identifica por CON QUIÉN hablo (fijo), no por quién
+    // envió el último mensaje. Se resuelve en batch para todas las conversaciones.
+    const otherPartyIds = new Set(
+      signedContracts.map((c) => (c.requesterId === profile.id ? c.providerId : c.requesterId)),
+    );
+    const otherParties = await this.prisma.userProfile.findMany({
+      where: { id: { in: [...otherPartyIds] } },
+      select: { id: true, displayName: true, avatarUrl: true },
+    });
+    const otherPartyById = new Map(otherParties.map((p) => [p.id, p]));
+
     // Para cada conversación, obtener último mensaje y count no leídos
-    const conversations: { requestId: string; lastMessage: any; unreadCount: number; closed: boolean }[] = [];
+    const conversations: { requestId: string; lastMessage: any; otherParty: any; unreadCount: number; closed: boolean }[] = [];
     for (const requestId of allRequestIds) {
       const lastMessage = await this.prisma.message.findFirst({
         where: { requestId },
@@ -125,10 +136,17 @@ export class MessagingService {
       const unread = await this.prisma.message.count({
         where: { requestId, senderId: { not: profile.id }, readAt: null },
       });
-      const status = statusByRequestId.get(requestId);
-      const closed = status === 'COMPLETED' || status === 'EVALUATED';
+      const contract = contractByRequestId.get(requestId);
+      const closed = contract?.status === 'COMPLETED' || contract?.status === 'EVALUATED';
+      const otherPartyId = contract && (contract.requesterId === profile.id ? contract.providerId : contract.requesterId);
       if (lastMessage) {
-        conversations.push({ requestId, lastMessage, unreadCount: unread, closed });
+        conversations.push({
+          requestId,
+          lastMessage,
+          otherParty: otherPartyId ? otherPartyById.get(otherPartyId) : null,
+          unreadCount: unread,
+          closed,
+        });
       }
     }
 
