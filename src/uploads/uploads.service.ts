@@ -1,6 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { v2 as cloudinary, UploadApiResponse } from 'cloudinary';
 import { Readable } from 'stream';
+import { reportPlatformUsage } from '../common/platform-usage';
 
 @Injectable()
 export class UploadsService {
@@ -29,6 +30,8 @@ export class UploadsService {
             this.logger.error(`Cloudinary upload error: ${error?.message}`);
             return reject(error || new Error('Upload failed'));
           }
+          reportPlatformUsage({ platform: 'CLOUDINARY', metric: 'uploads', quantity: 1 });
+          if (res.bytes) reportPlatformUsage({ platform: 'CLOUDINARY', metric: 'upload_bytes', quantity: res.bytes });
           resolve(res);
         },
       );
