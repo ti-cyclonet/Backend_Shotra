@@ -6,16 +6,41 @@ import { CreateProfileDto, UpdateProfileDto, AddSkillDto } from './dto/create-pr
 export class ProfilesService {
   constructor(private readonly prisma: PrismaService) {}
 
+  /**
+   * Avatar vigente en Authoriza (endpoint interno, x-internal-key).
+   * Devuelve la URL, null si no tiene foto, o undefined si no se pudo consultar.
+   */
+  private async fetchAuthorizaAvatar(authorizaUserId: string): Promise<string | null | undefined> {
+    const base = (process.env.AUTHORIZA_API_URL || 'http://localhost:3000').replace(/\/+$/, '');
+    try {
+      const res = await fetch(`${base}/api/auth/internal/avatar`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_API_KEY || '' },
+        body: JSON.stringify({ userId: authorizaUserId }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return undefined;
+      const data = (await res.json()) as { url?: string | null };
+      return data?.url || null;
+    } catch {
+      return undefined;
+    }
+  }
+
   async findOrCreateProfile(userId: string, email: string, rol?: string, avatarFromAuthoriza?: string) {
     // Derivar el plan del rol de Authoriza: adminShotra=PRO, userShotra=FREE
     const planFromRole = rol === 'adminShotra' ? 'PRO' : 'FREE';
 
-    // El avatar VIVE en Authoriza (identidad central). Solo sincronizamos si viene
-    // una URL real (no el fallback ui-avatars generado por iniciales).
-    const authorizaAvatar =
+    // El avatar VIVE en Authoriza (identidad central). Se consulta el VIGENTE:
+    // el claim `image` del token se congela al iniciar sesión, y usarlo
+    // sobrescribía con la foto vieja un cambio hecho después (aquí o en otra app).
+    // Si Authoriza no responde, el token solo sirve para un perfil nuevo.
+    const current = await this.fetchAuthorizaAvatar(userId);
+    const tokenAvatar =
       avatarFromAuthoriza && !avatarFromAuthoriza.includes('ui-avatars.com')
         ? avatarFromAuthoriza
         : null;
+    const authorizaAvatar = current === undefined ? null : current;
 
     const includeRel = { skills: { include: { category: true } }, portfolio: true };
 
@@ -54,7 +79,7 @@ export class ProfilesService {
             email,
             displayName: email.split('@')[0],
             plan: planFromRole,
-            ...(authorizaAvatar ? { avatarUrl: authorizaAvatar } : {}),
+            ...((authorizaAvatar ?? tokenAvatar) ? { avatarUrl: authorizaAvatar ?? tokenAvatar } : {}),
           },
           include: includeRel,
         });
