@@ -44,12 +44,12 @@ export class NotificationsService {
         },
       });
 
-      // Push remoto (llega con la app cerrada): apagado por defecto. Con la
-      // app abierta las novedades llegan por el polling de la app (banner,
-      // sonido y badge), así que el push solo servía con la app cerrada, que es
-      // justo cuando NO deben llegar. Se reactiva con SHOTRA_REMOTE_PUSH=true.
-      if (process.env.SHOTRA_REMOTE_PUSH === 'true') {
-        this.sendPush(input).catch((err) =>
+      // Push remoto: llega con la app minimizada o cerrada (Android no
+      // distingue un caso del otro). Solo a los dispositivos con sesión de ese
+      // perfil: al cerrar sesión la app desvincula su token. Se apaga con
+      // SHOTRA_REMOTE_PUSH=false.
+      if (process.env.SHOTRA_REMOTE_PUSH !== 'false') {
+        this.sendPush(input, notification.id).catch((err) =>
           console.error('[NotificationsService] sendPush failed:', err),
         );
       }
@@ -68,7 +68,7 @@ export class NotificationsService {
    * la base los tokens que Expo reporta como inválidos (app desinstalada,
    * dispositivo reseteado, etc.).
    */
-  private async sendPush(input: NotifyInput): Promise<void> {
+  private async sendPush(input: NotifyInput, notificationId?: string): Promise<void> {
     const tokens = await this.prisma.pushToken.findMany({ where: { profileId: input.profileId } });
     if (tokens.length === 0) {
       console.warn(`[NotificationsService] sendPush: no hay push tokens registrados para profile ${input.profileId}, se omite el push.`);
@@ -93,7 +93,9 @@ export class NotificationsService {
       badge: unread,
       priority: 'high',
       channelId: 'default',
-      data: { entityType: input.entityType, entityId: input.entityId, notificationType: input.type },
+      // notificationId: la app no publica una notificación local repetida si
+      // esta ya está en la bandeja (ver NotificationsContext)
+      data: { notificationId, entityType: input.entityType, entityId: input.entityId, notificationType: input.type },
     }));
 
     try {
