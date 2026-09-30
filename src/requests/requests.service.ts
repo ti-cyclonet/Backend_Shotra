@@ -1,6 +1,25 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRequestDto } from './dto/create-request.dto';
+import { computeExpiresAt, expiryConfig, expiryReason } from './request-expiry';
+
+/** Ofertas vigentes: se cuentan aparte de las rechazadas o retiradas. */
+const PENDING_COUNT = { proposals: { where: { status: 'PENDING' as const } } };
+
+/**
+ * Hasta cuándo sigue abierta una publicación (para mostrar "vence en…"):
+ * sin ofertas, su expiresAt; con ofertas, el plazo máximo para elegir; y
+ * nunca después de la fecha de servicio.
+ */
+function closesAt(r: { createdAt: Date; expiresAt: Date | null; scheduledAt: Date | null }, pending: number): Date | null {
+  const cfg = expiryConfig();
+  let at = pending > 0 ? r.createdAt.getTime() + cfg.maxOpenDays * 864e5 : r.expiresAt?.getTime() ?? null;
+  if (r.scheduledAt) {
+    const limit = r.scheduledAt.getTime() + cfg.scheduleGraceHours * 36e5;
+    at = at === null ? limit : Math.min(at, limit);
+  }
+  return at === null ? null : new Date(at);
+}
 
 @Injectable()
 export class RequestsService {
@@ -20,10 +39,13 @@ export class RequestsService {
     });
     if (!category) throw new NotFoundException('Categoría no encontrada');
 
-    // Expiración por defecto: 48h (o 24h si urgente)
-    const hoursToExpire = dto.isUrgent ? 24 : 48;
-    const expiresAt = new Date();
-    expiresAt.setHours(expiresAt.getHours() + hoursToExpire);
+    // Vence si no recibe ofertas: 48 h (24 h si es urgente) y nunca después
+    // de la fecha de servicio (ver request-expiry.ts)
+    const scheduledAt = dto.scheduledAt ? new Date(dto.scheduledAt) : null;
+    if (scheduledAt && scheduledAt.getTime() < Date.now() - 5 * 60 * 1000) {
+      throw new BadRequestException('La fecha del servicio ya pasó. Elige una fecha futura.');
+    }
+    const expiresAt = computeExpiresAt(new Date(), !!dto.isUrgent, scheduledAt);
 
     return this.prisma.serviceRequest.create({
       data: {
@@ -40,7 +62,7 @@ export class RequestsService {
         originLongitude: dto.originLongitude,
         originAddress: dto.originAddress,
         isRemote: dto.isRemote || false,
-        scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : null,
+        scheduledAt,
         isUrgent: dto.isUrgent || false,
         expiresAt,
         status: 'PUBLISHED',
@@ -62,16 +84,23 @@ export class RequestsService {
       where.category = { slug: filters.categorySlug };
     }
 
-    const requests = await this.prisma.serviceRequest.findMany({
+    const raw = await this.prisma.serviceRequest.findMany({
       where,
       include: {
         category: true,
         requester: { select: { displayName: true, avatarUrl: true, averageRating: true, city: true } },
         _count: { select: { proposals: true } },
+        proposals: { where: { status: 'PENDING' }, select: { id: true } },
       },
       orderBy: [{ isUrgent: 'desc' }, { createdAt: 'desc' }],
-      take: 50,
+      take: 80,
     });
+    // Las vencidas salen del feed al instante (el cron las archiva cada 10 min)
+    const now = new Date();
+    const requests = raw
+      .filter((r) => !expiryReason({ ...r, pendingProposals: r.proposals.length }, now))
+      .slice(0, 50)
+      .map(({ proposals, ...r }) => ({ ...r, closesAt: closesAt(r, proposals.length) }));
 
     // Si hay coordenadas, calcular distancia y filtrar
     if (filters.lat && filters.lng) {
@@ -104,11 +133,12 @@ export class RequestsService {
     });
     if (!profile) return [];
 
-    return this.prisma.serviceRequest.findMany({
+    const list = await this.prisma.serviceRequest.findMany({
       where: { requesterId: profile.id },
       include: {
         category: true,
         _count: { select: { proposals: true } },
+        proposals: { where: { status: 'PENDING' }, select: { id: true } },
         // Incluir el contrato (si existe) para que el cliente pueda mostrar el
         // estado REAL del ciclo (firmado, completado, evaluado) aunque el
         // request.status vaya un paso atrás.
@@ -116,6 +146,15 @@ export class RequestsService {
       },
       orderBy: { createdAt: 'desc' },
     });
+    // closesAt: hasta cuándo sigue abierta; expiredNow: ya venció aunque el
+    // cron aún no la haya archivado (la app la muestra como vencida)
+    const now = new Date();
+    return list.map(({ proposals, ...r }) => ({
+      ...r,
+      pendingProposals: proposals.length,
+      closesAt: ['PUBLISHED', 'IN_PROPOSALS'].includes(r.status) ? closesAt(r, proposals.length) : null,
+      expiredNow: !!expiryReason({ ...r, pendingProposals: proposals.length }, now),
+    }));
   }
 
   /** Detalle de una solicitud con propuestas */
@@ -156,6 +195,9 @@ export class RequestsService {
     }
     (request as any).isRequester = isRequester;
     (request as any).proposalsCount = proposalsCount;
+    const pending = request.proposals.filter((p) => p.status === 'PENDING').length;
+    (request as any).closesAt = ['PUBLISHED', 'IN_PROPOSALS'].includes(request.status) ? closesAt(request, pending) : null;
+    (request as any).expiredNow = !!expiryReason({ ...request, pendingProposals: pending }, new Date());
 
     // Resolver las fotos elegidas por cada propuesta (imageIds no es una
     // relación de Prisma, así que se resuelven aparte en una sola consulta).
@@ -193,6 +235,47 @@ export class RequestsService {
     return this.prisma.serviceRequest.update({
       where: { id: requestId },
       data: { status: 'CANCELLED' },
+    });
+  }
+
+  /**
+   * Volver a publicar una solicitud vencida: queda abierta de nuevo con un
+   * plazo nuevo. Si tenía fecha de servicio y ya pasó, hay que elegir otra.
+   */
+  async republish(userId: string, requestId: string, scheduledAtIso?: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
+    if (!profile) throw new NotFoundException('Perfil no encontrado');
+    const request = await this.prisma.serviceRequest.findFirst({
+      where: { id: requestId, requesterId: profile.id },
+      include: { contract: { select: { id: true } }, proposals: { where: { status: 'PENDING' }, select: { id: true } } },
+    });
+    if (!request) throw new NotFoundException('Solicitud no encontrada');
+    // Vencida: archivada por el cron o ya pasada de plazo (el cron corre cada 10 min)
+    const expired = request.status === 'EXPIRED' || !!expiryReason({ ...request, pendingProposals: request.proposals.length });
+    if (!expired || request.contract) {
+      throw new BadRequestException('Solo se puede volver a publicar una solicitud vencida.');
+    }
+    if (request.proposals.length) {
+      await this.prisma.proposal.updateMany({ where: { requestId, status: 'PENDING' }, data: { status: 'REJECTED' } });
+    }
+
+    let scheduledAt: Date | null = scheduledAtIso ? new Date(scheduledAtIso) : request.scheduledAt;
+    if (scheduledAt && Number.isNaN(scheduledAt.getTime())) throw new BadRequestException('Fecha inválida.');
+    if (scheduledAt && scheduledAt.getTime() <= Date.now()) {
+      if (scheduledAtIso) throw new BadRequestException('La nueva fecha debe ser futura.');
+      throw new BadRequestException({ code: 'NEW_DATE_REQUIRED', message: 'La fecha que habías pedido ya pasó. Elige una nueva fecha para volver a publicarla.' });
+    }
+
+    return this.prisma.serviceRequest.update({
+      where: { id: requestId },
+      data: {
+        status: 'PUBLISHED',
+        scheduledAt,
+        // Vuelve a aparecer arriba en el feed, con un plazo completo
+        createdAt: new Date(),
+        expiresAt: computeExpiresAt(new Date(), request.isUrgent, scheduledAt),
+      },
+      include: { category: true },
     });
   }
 }

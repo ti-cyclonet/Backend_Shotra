@@ -111,6 +111,7 @@ enum NotificationType {
   CONTRACT_COMPLETED // el servicio fue marcado completado
   NEW_RATING         // recibiste una evaluacion
   NEW_MESSAGE        // nuevo mensaje
+  REQUEST_EXPIRED    // tu publicación venció (sin ofertas, fecha pasada o sin elegir)
 }
 
 // ─── Habilidades del ofertante ─────────────────────────────────────────────────
