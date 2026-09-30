@@ -43,9 +43,15 @@ export class NotificationsService {
         },
       });
 
-      this.sendPush(input).catch((err) =>
-        console.error('[NotificationsService] sendPush failed:', err),
-      );
+      // Push remoto (llega con la app cerrada): apagado por defecto. Con la
+      // app abierta las novedades llegan por el polling de la app (banner,
+      // sonido y badge), así que el push solo servía con la app cerrada, que es
+      // justo cuando NO deben llegar. Se reactiva con SHOTRA_REMOTE_PUSH=true.
+      if (process.env.SHOTRA_REMOTE_PUSH === 'true') {
+        this.sendPush(input).catch((err) =>
+          console.error('[NotificationsService] sendPush failed:', err),
+        );
+      }
 
       return notification;
     } catch (err) {

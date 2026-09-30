@@ -39,8 +39,8 @@ export class RequestsController {
 
   /** Detalle de una solicitud */
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.requestsService.findOne(id);
+  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.requestsService.findOne(id, user?.userId);
   }
 
   /** Cancelar solicitud */

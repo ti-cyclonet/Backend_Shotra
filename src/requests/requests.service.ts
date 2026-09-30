@@ -119,7 +119,12 @@ export class RequestsService {
   }
 
   /** Detalle de una solicitud con propuestas */
-  async findOne(requestId: string) {
+  /**
+   * Detalle de una solicitud. Las propuestas son privadas: el solicitante ve
+   * todas; un ofertante solo ve la suya (antes cada ofertante veía el precio,
+   * el mensaje y el estado de las ofertas de los demás).
+   */
+  async findOne(requestId: string, viewerUserId?: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
       include: {
@@ -140,6 +145,17 @@ export class RequestsService {
       },
     });
     if (!request) throw new NotFoundException('Solicitud no encontrada');
+
+    const viewer = viewerUserId
+      ? await this.prisma.userProfile.findUnique({ where: { authorizaUserId: viewerUserId }, select: { id: true } })
+      : null;
+    const isRequester = !!viewer && viewer.id === request.requesterId;
+    const proposalsCount = request.proposals.length;
+    if (!isRequester) {
+      (request as any).proposals = request.proposals.filter((p) => viewer && p.providerId === viewer.id);
+    }
+    (request as any).isRequester = isRequester;
+    (request as any).proposalsCount = proposalsCount;
 
     // Resolver las fotos elegidas por cada propuesta (imageIds no es una
     // relación de Prisma, así que se resuelven aparte en una sola consulta).
