@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateProposalDto } from './dto/create-proposal.dto';
 import { ContractsService } from '../contracts/contracts.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { expiryReason } from '../requests/request-expiry';
 
 @Injectable()
 export class ProposalsService {
@@ -27,6 +28,11 @@ export class ProposalsService {
     if (!request) throw new NotFoundException('Solicitud no encontrada');
     if (!['PUBLISHED', 'IN_PROPOSALS'].includes(request.status)) {
       throw new BadRequestException('Esta solicitud ya no acepta propuestas');
+    }
+    // Vencida aunque el cron aún no la haya archivado
+    const pendingNow = await this.prisma.proposal.count({ where: { requestId: request.id, status: 'PENDING' } });
+    if (expiryReason({ ...request, pendingProposals: pendingNow })) {
+      throw new BadRequestException('Esta solicitud venció y ya no acepta propuestas');
     }
     // No puedes cotizar tu propia solicitud
     if (request.requesterId === profile.id) {

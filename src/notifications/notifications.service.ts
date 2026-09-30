@@ -8,7 +8,8 @@ type NotificationType =
   | 'CONTRACT_SIGNED'
   | 'CONTRACT_COMPLETED'
   | 'NEW_RATING'
-  | 'NEW_MESSAGE';
+  | 'NEW_MESSAGE'
+  | 'REQUEST_EXPIRED';
 
 interface NotifyInput {
   profileId: string;

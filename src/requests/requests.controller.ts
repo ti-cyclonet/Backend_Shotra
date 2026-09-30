@@ -43,6 +43,12 @@ export class RequestsController {
     return this.requestsService.findOne(id, user?.userId);
   }
 
+  /** Volver a publicar una solicitud vencida (opcional: nueva fecha de servicio) */
+  @Patch(':id/republish')
+  republish(@CurrentUser() user: any, @Param('id') id: string, @Body('scheduledAt') scheduledAt?: string) {
+    return this.requestsService.republish(user.userId, id, scheduledAt);
+  }
+
   /** Cancelar solicitud */
   @Patch(':id/cancel')
   cancel(@CurrentUser() user: any, @Param('id') id: string) {
