@@ -4,6 +4,7 @@ import { CreateProposalDto } from './dto/create-proposal.dto';
 import { ContractsService } from '../contracts/contracts.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { expiryReason } from '../requests/request-expiry';
+import { PROVIDER_REPUTATION_SELECT } from '../ratings/reputation';
 
 @Injectable()
 export class ProposalsService {
@@ -69,7 +70,7 @@ export class ProposalsService {
         status: 'PENDING',
       },
       include: {
-        provider: { select: { displayName: true, avatarUrl: true, averageRating: true, completedJobs: true } },
+        provider: { select: { displayName: true, avatarUrl: true, averageRating: true, ...PROVIDER_REPUTATION_SELECT } },
       },
     });
 

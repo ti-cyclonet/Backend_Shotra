@@ -21,8 +21,8 @@ export class ContractsController {
 
   /** Detalle de un contrato */
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.contractsService.findOne(id);
+  findOne(@CurrentUser() user: any, @Param('id') id: string) {
+    return this.contractsService.findOne(id, user?.userId);
   }
 
   /** Firmar contrato */

@@ -2,6 +2,7 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CommissionsService, PlanKey } from '../commissions/commissions.service';
+import { RATING_WINDOW_DAYS, ratingDeadline } from '../ratings/reputation';
 
 @Injectable()
 export class ContractsService {
@@ -242,6 +243,12 @@ export class ContractsService {
       data: { status: 'COMPLETED' },
     }).catch(() => undefined);
 
+    // El trabajo cuenta para el ofertante al completarse (no depende de que se califiquen)
+    await this.prisma.userProfile.update({
+      where: { id: contract.providerId },
+      data: { completedJobs: { increment: 1 } },
+    }).catch(() => undefined);
+
     // Devengar la comisión SOLO ahora que ambas partes confirmaron.
     await this.accrueCommissionForContract(contract, completed.completedAt ?? now);
 
@@ -249,7 +256,7 @@ export class ContractsService {
       profileId: contract.providerId,
       type: 'CONTRACT_COMPLETED',
       title: 'Servicio confirmado',
-      body: `El solicitante confirmó la recepción y el pago de "${contract.code}". Ya pueden calificarse.`,
+      body: `El solicitante confirmó la recepción y el pago de "${contract.code}". Tienen ${RATING_WINDOW_DAYS} días para calificarse.`,
       entityType: 'contract',
       entityId: contractId,
     });
@@ -295,8 +302,11 @@ export class ContractsService {
     });
   }
 
-  /** Detalle de un contrato */
-  async findOne(contractId: string) {
+  /**
+   * Detalle de un contrato. Calificación a ciegas: de las evaluaciones solo se
+   * devuelven la propia y las ya reveladas.
+   */
+  async findOne(contractId: string, viewerUserId?: string) {
     const contract = await this.prisma.serviceContract.findUnique({
       where: { id: contractId },
       include: {
@@ -308,6 +318,14 @@ export class ContractsService {
       },
     });
     if (!contract) throw new NotFoundException('Contrato no encontrado');
-    return contract;
+
+    const viewer = viewerUserId
+      ? await this.prisma.userProfile.findUnique({ where: { authorizaUserId: viewerUserId }, select: { id: true } })
+      : null;
+    return {
+      ...contract,
+      ratings: contract.ratings.filter((r) => r.revealedAt || (viewer && r.authorId === viewer.id)),
+      ratingDeadline: ratingDeadline(contract.completedAt),
+    };
   }
 }
