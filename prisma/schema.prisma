@@ -40,10 +40,22 @@ model UserProfile {
   authorizaCommissionContractId String? // id del contrato de comisiones en Authoriza
   commissionCharges CommissionCharge[]
   
-  // Métricas de reputación (calculadas)
+  // Métricas de reputación (calculadas en src/ratings/reputation.ts).
+  // averageRating/totalRatings: promedio global de todas las evaluaciones
+  // reveladas (se conserva para versiones viejas de la app). La reputación útil
+  // va separada por rol: cómo le ha ido como ofertante y como solicitante.
   averageRating   Float    @default(0)
   totalRatings    Int      @default(0)
   completedJobs   Int      @default(0)
+
+  providerRating       Float  @default(0)
+  providerRatingCount  Int    @default(0)
+  providerRepeatRate   Float? // 0-1: % que lo volvería a contratar
+  providerCriteria     Json?  // { quality, punctuality, communication, priceFairness }
+  requesterRating      Float  @default(0)
+  requesterRatingCount Int    @default(0)
+  requesterRepeatRate  Float? // 0-1: % que le volvería a trabajar
+  requesterCriteria    Json?  // { clarity, payment, respect, access }
   level           Int      @default(1)
 
   // Relaciones
@@ -110,6 +122,7 @@ enum NotificationType {
   CONTRACT_SIGNED    // la otra parte firmo el contrato
   CONTRACT_COMPLETED // el servicio fue marcado completado
   NEW_RATING         // recibiste una evaluacion
+  RATING_REVEALED    // ya puedes ver la evaluacion que recibiste
   NEW_MESSAGE        // nuevo mensaje
   REQUEST_EXPIRED    // tu publicación venció (sin ofertas, fecha pasada o sin elegir)
 }
@@ -332,17 +345,39 @@ model Rating {
   targetId    String
   target      UserProfile @relation("RatingTarget", fields: [targetId], references: [id])
 
+  // Rol del evaluado en este contrato: define qué criterios aplican
+  targetRole  RatingRole
+
   score       Int      // 1-5
   comment     String?
-  // Criterios específicos
-  quality     Int?     // 1-5
-  punctuality Int?     // 1-5
-  communication Int?   // 1-5
+  wouldRepeat Boolean? // ¿lo volverías a contratar? / ¿le volverías a trabajar?
+
+  // Criterios cuando se evalúa al OFERTANTE (1-5)
+  quality       Int?
+  punctuality   Int?
+  communication Int?
+  priceFairness Int?   // respetó el precio cotizado
+
+  // Criterios cuando se evalúa al SOLICITANTE (1-5)
+  clarity     Int?     // lo descrito coincidió con la realidad
+  payment     Int?     // pagó completo y a tiempo
+  respect     Int?     // trato y respeto
+  access      Int?     // facilitó acceso y condiciones
+
+  // Calificación a ciegas: nadie ve la evaluación que recibió hasta que ambas
+  // partes califican o vence la ventana (ver src/ratings/rating-reveal.service.ts).
+  revealedAt  DateTime?
 
   createdAt   DateTime @default(now())
 
   @@unique([contractId, authorId]) // un solo rating por persona por contrato
+  @@index([targetId, targetRole])
   @@map("ratings")
+}
+
+enum RatingRole {
+  PROVIDER
+  REQUESTER
 }
 
 // ─── Mensajería / Chat ─────────────────────────────────────────────────────────

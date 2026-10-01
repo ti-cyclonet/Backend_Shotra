@@ -2,6 +2,20 @@ import { Injectable, NotFoundException, BadRequestException } from '@nestjs/comm
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { computeExpiresAt, expiryConfig, expiryReason } from './request-expiry';
+import {
+  PROVIDER_REPUTATION_SELECT,
+  REQUESTER_REPUTATION_SELECT,
+  providerReputation,
+  requesterReputation,
+} from '../ratings/reputation';
+
+/** Adjunta el resumen de reputación (insignias, criterios, % recontratación). */
+function withProviderReputation<T extends Parameters<typeof providerReputation>[0]>(p: T | null) {
+  return p ? { ...p, reputation: providerReputation(p) } : p;
+}
+function withRequesterReputation<T extends Parameters<typeof requesterReputation>[0]>(p: T | null) {
+  return p ? { ...p, reputation: requesterReputation(p) } : p;
+}
 
 /** Ofertas vigentes: se cuentan aparte de las rechazadas o retiradas. */
 const PENDING_COUNT = { proposals: { where: { status: 'PENDING' as const } } };
@@ -88,7 +102,7 @@ export class RequestsService {
       where,
       include: {
         category: true,
-        requester: { select: { displayName: true, avatarUrl: true, averageRating: true, city: true } },
+        requester: { select: { displayName: true, avatarUrl: true, averageRating: true, city: true, ...REQUESTER_REPUTATION_SELECT } },
         _count: { select: { proposals: true } },
         proposals: { where: { status: 'PENDING' }, select: { id: true } },
       },
@@ -100,7 +114,11 @@ export class RequestsService {
     const requests = raw
       .filter((r) => !expiryReason({ ...r, pendingProposals: r.proposals.length }, now))
       .slice(0, 50)
-      .map(({ proposals, ...r }) => ({ ...r, closesAt: closesAt(r, proposals.length) }));
+      .map(({ proposals, ...r }) => ({
+        ...r,
+        requester: withRequesterReputation(r.requester),
+        closesAt: closesAt(r, proposals.length),
+      }));
 
     // Si hay coordenadas, calcular distancia y filtrar
     if (filters.lat && filters.lng) {
@@ -168,11 +186,11 @@ export class RequestsService {
       where: { id: requestId },
       include: {
         category: true,
-        requester: { select: { id: true, displayName: true, avatarUrl: true, averageRating: true, city: true } },
+        requester: { select: { id: true, displayName: true, avatarUrl: true, averageRating: true, city: true, ...REQUESTER_REPUTATION_SELECT } },
         proposals: {
           include: {
             provider: {
-              select: { id: true, displayName: true, avatarUrl: true, averageRating: true, completedJobs: true },
+              select: { id: true, displayName: true, avatarUrl: true, averageRating: true, ...PROVIDER_REPUTATION_SELECT },
             },
           },
           orderBy: { createdAt: 'asc' },
@@ -215,6 +233,24 @@ export class RequestsService {
     } else {
       (request as any).proposals = request.proposals.map((p) => ({ ...p, images: [] }));
     }
+
+    // Reputación del ofertante (como ofertante) y orden recomendado: primero las
+    // pendientes, y entre ellas por promedio bayesiano (no por la que llegó antes).
+    const ranked = ((request as any).proposals as any[])
+      .map((p) => ({ ...p, provider: withProviderReputation(p.provider) }))
+      .sort((a, b) => {
+        const pa = a.status === 'PENDING' ? 0 : 1;
+        const pb = b.status === 'PENDING' ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return (b.provider?.reputation?.score ?? 0) - (a.provider?.reputation?.score ?? 0);
+      });
+    // "Recomendada": la mejor pendiente, solo si su ofertante ya tiene evaluaciones
+    const top = ranked[0];
+    if (top && top.status === 'PENDING' && (top.provider?.reputation?.count ?? 0) > 0 && ranked.filter((p) => p.status === 'PENDING').length > 1) {
+      top.recommended = true;
+    }
+    (request as any).proposals = ranked;
+    (request as any).requester = withRequesterReputation(request.requester);
 
     return request;
   }

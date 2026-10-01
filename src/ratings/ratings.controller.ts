@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { RatingsService } from './ratings.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -14,10 +14,10 @@ export class RatingsController {
     return this.ratingsService.create(user.userId, dto);
   }
 
-  /** Ver evaluaciones de un perfil (público) */
+  /** Ver evaluaciones reveladas de un perfil (público). ?role=PROVIDER|REQUESTER */
   @Public()
   @Get('profile/:profileId')
-  findByProfile(@Param('profileId') profileId: string) {
-    return this.ratingsService.findByProfile(profileId);
+  findByProfile(@Param('profileId') profileId: string, @Query('role') role?: string) {
+    return this.ratingsService.findByProfile(profileId, role);
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { providerReputation, requesterReputation } from '../ratings/reputation';
 import { CreateProfileDto, UpdateProfileDto, AddSkillDto } from './dto/create-profile.dto';
 
 @Injectable()
@@ -122,11 +123,15 @@ export class ProfilesService {
       include: {
         skills: { include: { category: true } },
         portfolio: true,
-        ratingsReceived: { take: 10, orderBy: { createdAt: 'desc' } },
+        ratingsReceived: { where: { revealedAt: { not: null } }, take: 10, orderBy: { createdAt: 'desc' } },
       },
     });
     if (!profile) throw new NotFoundException('Perfil no encontrado');
-    return profile;
+    return {
+      ...profile,
+      providerReputation: providerReputation(profile),
+      requesterReputation: requesterReputation(profile),
+    };
   }
 
   async updateProfile(userId: string, dto: UpdateProfileDto) {
