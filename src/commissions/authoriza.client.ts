@@ -27,7 +27,8 @@ export class AuthorizaClient {
   private async request<T = any>(method: string, path: string, body?: any): Promise<T> {
     const res = await fetch(this.url(path), {
       method,
-      headers: { 'Content-Type': 'application/json' },
+      // Las rutas de facturas de Authoriza exigen la clave interna (no son públicas)
+      headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_API_KEY || '' },
       body: body ? JSON.stringify(body) : undefined,
     });
     const text = await res.text();
