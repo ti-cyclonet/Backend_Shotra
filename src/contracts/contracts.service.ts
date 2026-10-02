@@ -322,9 +322,13 @@ export class ContractsService {
     const viewer = viewerUserId
       ? await this.prisma.userProfile.findUnique({ where: { authorizaUserId: viewerUserId }, select: { id: true } })
       : null;
+    // Opción B: cada quien ve la evaluación que hizo; la que recibió no se
+    // muestra aquí (ni quién ni qué dijo): solo que ya cuenta en su reputación.
+    // Los comentarios le llegan anónimos y agrupados en su perfil.
     return {
       ...contract,
-      ratings: contract.ratings.filter((r) => r.revealedAt || (viewer && r.authorId === viewer.id)),
+      ratings: contract.ratings.filter((r) => viewer && r.authorId === viewer.id),
+      receivedRatingCounted: !!viewer && contract.ratings.some((r) => r.targetId === viewer.id && !!r.revealedAt),
       ratingDeadline: ratingDeadline(contract.completedAt),
     };
   }

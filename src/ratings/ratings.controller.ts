@@ -14,7 +14,13 @@ export class RatingsController {
     return this.ratingsService.create(user.userId, dto);
   }
 
-  /** Ver evaluaciones reveladas de un perfil (público). ?role=PROVIDER|REQUESTER */
+  /** Mis comentarios recibidos (anónimos y por grupos) y cuántos faltan por llegar. */
+  @Get('me/feedback')
+  myFeedback(@CurrentUser() user: any, @Query('role') role?: string) {
+    return this.ratingsService.myFeedback(user.userId, role);
+  }
+
+  /** Comentarios de un perfil (público), anónimos y por grupos. ?role=PROVIDER|REQUESTER */
   @Public()
   @Get('profile/:profileId')
   findByProfile(@Param('profileId') profileId: string, @Query('role') role?: string) {

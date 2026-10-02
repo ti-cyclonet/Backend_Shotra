@@ -11,6 +11,7 @@ import { RequestsModule } from './requests/requests.module';
 import { ProposalsModule } from './proposals/proposals.module';
 import { ContractsModule } from './contracts/contracts.module';
 import { RatingsModule } from './ratings/ratings.module';
+import { InternalModule } from './internal/internal.module';
 import { MessagingModule } from './messaging/messaging.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { CommissionsModule } from './commissions/commissions.module';
@@ -31,6 +32,7 @@ import { PortfolioModule } from './portfolio/portfolio.module';
     ProposalsModule,
     ContractsModule,
     RatingsModule,
+    InternalModule,
     MessagingModule,
     NotificationsModule,
     CommissionsModule,
