@@ -123,7 +123,6 @@ export class ProfilesService {
       include: {
         skills: { include: { category: true } },
         portfolio: true,
-        ratingsReceived: { where: { revealedAt: { not: null } }, take: 10, orderBy: { createdAt: 'desc' } },
       },
     });
     if (!profile) throw new NotFoundException('Perfil no encontrado');

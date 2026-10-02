@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateRatingDto } from './dto/create-rating.dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CRITERIA, RATING_WINDOW_DAYS, RatingRole, ratingDeadline, recomputeReputation } from './reputation';
+import { BATCH_SIZE, RELEASE_DAYS, releaseFeedback } from './feedback';
 
 @Injectable()
 export class RatingsService {
@@ -104,7 +105,6 @@ export class RatingsService {
   async revealContract(contractId: string, now = new Date()) {
     const hidden = await this.prisma.rating.findMany({
       where: { contractId, revealedAt: null },
-      include: { author: { select: { displayName: true } } },
     });
     if (!hidden.length) return;
 
@@ -119,8 +119,8 @@ export class RatingsService {
       await this.notifications.notify({
         profileId: r.targetId,
         type: 'RATING_REVEALED',
-        title: 'Ya puedes ver tu evaluación',
-        body: `${r.author.displayName} te calificó con ${r.score} estrella(s).`,
+        title: 'Recibiste una nueva evaluación',
+        body: 'Ya cuenta en tu reputación. Los comentarios te llegan sin nombre y agrupados en tu perfil.',
         entityType: 'contract',
         entityId: contractId,
       });
@@ -152,14 +152,28 @@ export class RatingsService {
     }
   }
 
-  /** Evaluaciones reveladas de un perfil, opcionalmente solo las de un rol. */
+  /**
+   * Comentarios de un perfil (público): anónimos y liberados por grupos
+   * (ver feedback.ts). Nunca incluye quién los escribió ni cuándo.
+   */
   async findByProfile(profileId: string, role?: string) {
+    return (await this.feedbackFor(profileId, role)).released.slice(0, 30);
+  }
+
+  /** Mis comentarios: los liberados y cuántos están por llegar. */
+  async myFeedback(userId: string, role?: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { authorizaUserId: userId } });
+    if (!profile) throw new NotFoundException('Perfil no encontrado');
+    const { released, pending } = await this.feedbackFor(profile.id, role);
+    return { released: released.slice(0, 50), pending, batchSize: BATCH_SIZE, releaseDays: RELEASE_DAYS };
+  }
+
+  private async feedbackFor(profileId: string, role?: string) {
     const targetRole = role === 'PROVIDER' || role === 'REQUESTER' ? role : undefined;
-    return this.prisma.rating.findMany({
+    const ratings = await this.prisma.rating.findMany({
       where: { targetId: profileId, revealedAt: { not: null }, ...(targetRole ? { targetRole } : {}) },
-      include: { author: { select: { displayName: true, avatarUrl: true } } },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
+      select: { id: true, score: true, comment: true, targetRole: true, revealedAt: true },
     });
+    return releaseFeedback(ratings.map((r) => ({ ...r, revealedAt: r.revealedAt as Date })));
   }
 }
