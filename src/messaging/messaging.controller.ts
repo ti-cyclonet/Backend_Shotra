@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param } from '@nestjs/common';
 import { MessagingService } from './messaging.service';
 import { SendMessageDto } from './dto/send-message.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -19,9 +19,21 @@ export class MessagingController {
     return this.messagingService.getConversations(user.userId);
   }
 
-  /** Mensajes de una solicitud */
+  /** Chat completo con la otra persona de esta solicitud: mensajes, si se puede escribir y a qué contrato. */
+  @Get(':requestId/thread')
+  getThread(@CurrentUser() user: any, @Param('requestId') requestId: string) {
+    return this.messagingService.getThread(user.userId, requestId);
+  }
+
+  /** Mensajes del chat (todos los servicios con esa persona). Compatibilidad: InOut y apps anteriores. */
   @Get(':requestId')
   getMessages(@CurrentUser() user: any, @Param('requestId') requestId: string) {
     return this.messagingService.getMessages(user.userId, requestId);
+  }
+
+  /** Eliminar el chat para mí (la otra persona lo conserva). */
+  @Delete(':requestId')
+  hideThread(@CurrentUser() user: any, @Param('requestId') requestId: string) {
+    return this.messagingService.hideThread(user.userId, requestId);
   }
 }

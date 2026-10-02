@@ -396,6 +396,20 @@ model Message {
   @@map("messages")
 }
 
+// Chat eliminado por un usuario: el chat es uno por PAR de personas (no por
+// solicitud). Al eliminarlo se ocultan para ese usuario los mensajes
+// anteriores a hiddenBefore; si llega un mensaje nuevo o vuelven a tener un
+// contrato activo, el chat reaparece con lo nuevo.
+model ChatHide {
+  id             String   @id @default(uuid())
+  profileId      String   // quien lo eliminó
+  otherProfileId String   // con quién era el chat
+  hiddenBefore   DateTime
+
+  @@unique([profileId, otherProfileId])
+  @@map("chat_hides")
+}
+
 enum MessageType {
   TEXT
   IMAGE
