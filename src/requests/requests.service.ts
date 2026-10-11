@@ -8,6 +8,7 @@ import {
   providerReputation,
   requesterReputation,
 } from '../ratings/reputation';
+import { assertRequestRules } from './request-validation';
 
 /** Adjunta el resumen de reputación (insignias, criterios, % recontratación). */
 function withProviderReputation<T extends Parameters<typeof providerReputation>[0]>(p: T | null) {
@@ -52,6 +53,8 @@ export class RequestsService {
       where: { id: dto.categoryId },
     });
     if (!category) throw new NotFoundException('Categoría no encontrada');
+    // Delivery: dirección de destino obligatoria; presupuesto coherente
+    assertRequestRules(category, dto);
 
     // Vence si no recibe ofertas: 48 h (24 h si es urgente) y nunca después
     // de la fecha de servicio (ver request-expiry.ts)
