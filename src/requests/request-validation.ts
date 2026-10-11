@@ -1,8 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 
 /**
- * Reglas de una solicitud nueva según su categoría. Funciones puras
- * (request-validation.spec.ts).
+ * Reglas de una solicitud nueva según su categoría (función pura).
  *
  * Delivery (categorías con requiresRoute: domicilios, mensajería, mudanzas…):
  * la dirección de destino es obligatoria. El domiciliario necesita saber a
