@@ -19,6 +19,7 @@ import { UploadsModule } from './uploads/uploads.module';
 import { HealthModule } from './health/health.module';
 import { PushTokensModule } from './push-tokens/push-tokens.module';
 import { PortfolioModule } from './portfolio/portfolio.module';
+import { RoutesModule } from './routes/routes.module';
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { PortfolioModule } from './portfolio/portfolio.module';
     UploadsModule,
     PushTokensModule,
     PortfolioModule,
+    RoutesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
