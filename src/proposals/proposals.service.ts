@@ -5,6 +5,7 @@ import { ContractsService } from '../contracts/contracts.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { expiryReason } from '../requests/request-expiry';
 import { PROVIDER_REPUTATION_SELECT } from '../ratings/reputation';
+import { ROUTE_BUSY_CONTRACT } from '../routes/route-rules';
 
 @Injectable()
 export class ProposalsService {
@@ -58,6 +59,26 @@ export class ProposalsService {
       imageIds = owned.map((i) => i.id).slice(0, 3);
     }
 
+    // Oferta "En ruta": la ruta es del ofertante, sigue activa, tiene cupo y
+    // la solicitud cayó en ella (RouteMatch).
+    let routeMatchId: string | null = null;
+    if (dto.routeId) {
+      const route = await this.prisma.providerRoute.findUnique({ where: { id: dto.routeId } });
+      if (!route || route.providerId !== profile.id) throw new BadRequestException('Ruta no encontrada');
+      if (route.status !== 'ACTIVE') throw new BadRequestException('Esa ruta ya no está activa');
+      const match = await this.prisma.routeMatch.findUnique({
+        where: { routeId_requestId: { routeId: route.id, requestId: dto.requestId } },
+      });
+      if (!match || match.status === 'EXPIRED') throw new BadRequestException('Esta solicitud no está en tu ruta');
+      const busy = await this.prisma.proposal.count({
+        where: { routeId: route.id, status: 'ACCEPTED', contract: { status: { in: [...ROUTE_BUSY_CONTRACT] } } },
+      });
+      if (busy >= route.maxOrders) {
+        throw new BadRequestException(`Tu ruta ya lleva ${busy} pedido(s), el máximo que elegiste.`);
+      }
+      routeMatchId = match.id;
+    }
+
     // Crear propuesta
     const proposal = await this.prisma.proposal.create({
       data: {
@@ -67,12 +88,17 @@ export class ProposalsService {
         description: dto.description,
         estimatedTime: dto.estimatedTime,
         imageIds,
+        routeId: dto.routeId ?? null,
         status: 'PENDING',
       },
       include: {
         provider: { select: { displayName: true, avatarUrl: true, averageRating: true, ...PROVIDER_REPUTATION_SELECT } },
       },
     });
+
+    if (routeMatchId) {
+      await this.prisma.routeMatch.update({ where: { id: routeMatchId }, data: { status: 'PROPOSED' } });
+    }
 
     // Actualizar estado de la solicitud a IN_PROPOSALS si es la primera propuesta
     if (request.status === 'PUBLISHED') {

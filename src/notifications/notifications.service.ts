@@ -10,7 +10,8 @@ type NotificationType =
   | 'NEW_RATING'
   | 'RATING_REVEALED'
   | 'NEW_MESSAGE'
-  | 'REQUEST_EXPIRED';
+  | 'REQUEST_EXPIRED'
+  | 'ROUTE_MATCH';
 
 interface NotifyInput {
   profileId: string;
