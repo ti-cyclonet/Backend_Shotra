@@ -21,4 +21,9 @@ export class CreateProposalDto {
   @ArrayMaxSize(3)
   @IsString({ each: true })
   imageIds?: string[];
+
+  /** Oferta hecha desde una ruta propia ("En ruta"); la solicitud debe caer en ella. */
+  @IsOptional()
+  @IsString()
+  routeId?: string;
 }

@@ -68,6 +68,7 @@ model UserProfile {
   portfolio       PortfolioItem[]
   notifications   Notification[]
   pushTokens      PushToken[]
+  routes          ProviderRoute[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -125,6 +126,7 @@ enum NotificationType {
   RATING_REVEALED    // ya puedes ver la evaluacion que recibiste
   NEW_MESSAGE        // nuevo mensaje
   REQUEST_EXPIRED    // tu publicación venció (sin ofertas, fecha pasada o sin elegir)
+  ROUTE_MATCH        // hay un pedido sobre una ruta que publicaste
 }
 
 // ─── Habilidades del ofertante ─────────────────────────────────────────────────
@@ -216,6 +218,10 @@ model ServiceRequest {
   originLongitude Float?
   originAddress   String?
 
+  // Tamaño del paquete (solo categorías con requiresRoute). Null = SMALL
+  // para el cruce con rutas de ofertantes (ver src/routes).
+  packageSize     PackageSize?
+
   // Temporalidad
   scheduledAt     DateTime?  // cuándo se necesita el servicio
   isUrgent        Boolean    @default(false)
@@ -228,6 +234,7 @@ model ServiceRequest {
   proposals       Proposal[]
   contract        ServiceContract?
   messages        Message[]
+  routeMatches    RouteMatch[]
 
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -266,6 +273,11 @@ model Proposal {
   // puntual (ids de PortfolioItem; se resuelven a nivel de servicio, no es
   // una relación de Prisma porque no todo portafolio aplica a toda oferta).
   imageIds      String[] @default([])
+
+  // Oferta hecha desde una ruta publicada ("En ruta"): el ofertante ya iba
+  // de camino. Cuenta contra el cupo maxOrders de la ruta.
+  routeId       String?
+  route         ProviderRoute? @relation(fields: [routeId], references: [id], onDelete: SetNull)
 
   contract      ServiceContract?
 
@@ -533,4 +545,94 @@ enum CommissionChargeStatus {
   INVOICED      // incluido en una factura mensual de Authoriza
   PAID          // la factura fue pagada
   WAIVED        // condonado / anulado
+}
+
+// ─── Pedidos en ruta ───────────────────────────────────────────────────────────
+// El ofertante declara un trayecto que ya va a hacer; Shotra le ofrece las
+// solicitudes de domicilio cuya recogida y entrega quedan sobre ese trayecto
+// y en ese orden (ver src/routes y .kiro/specs/shotra-pedidos-en-ruta en el
+// repo cyclonet). Aplica igual a los domicilios que publica InOut.
+model ProviderRoute {
+  id              String   @id @default(uuid())
+  providerId      String
+  provider        UserProfile @relation(fields: [providerId], references: [id])
+
+  originLatitude  Float
+  originLongitude Float
+  originAddress   String?
+  destLatitude    Float
+  destLongitude   Float
+  destAddress     String?
+
+  // LineString de OSRM. Prisma no maneja geography: se escribe y se lee con
+  // SQL crudo (índice GIST en la migración).
+  geom            Unsupported("geography(LineString,4326)")?
+  distanceM       Int
+  durationS       Int
+
+  departAt        DateTime
+  arriveAt        DateTime // departAt + durationS
+
+  corridorM       Int         @default(600)
+  maxDetourM      Int         @default(2000)
+  maxDetourS      Int         @default(600)
+  maxPackageSize  PackageSize @default(SMALL)
+  maxOrders       Int         @default(3)
+
+  status          RouteStatus @default(ACTIVE)
+  lastPushAt      DateTime?   // throttle: un push por ruta cada 10 min
+
+  matches         RouteMatch[]
+  proposals       Proposal[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, departAt])
+  @@index([providerId, status])
+  @@map("provider_routes")
+}
+
+enum RouteStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum PackageSize {
+  SMALL   // cabe en un morral
+  MEDIUM  // caja mediana (parrilla o maletero)
+  LARGE   // requiere vehículo de carga
+}
+
+model RouteMatch {
+  id              String   @id @default(uuid())
+  routeId         String
+  route           ProviderRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  requestId       String
+  request         ServiceRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  pickupFraction  Float    // 0..1 sobre la ruta
+  dropoffFraction Float
+  detourM         Int?     // desvío real (OSRM); null = solo filtro geométrico
+  detourS         Int?
+  etaPickupAt     DateTime
+
+  status          RouteMatchStatus @default(SUGGESTED)
+  notifiedAt      DateTime?
+
+  createdAt       DateTime @default(now())
+
+  @@unique([routeId, requestId])
+  @@index([routeId, status])
+  @@index([requestId])
+  @@map("route_matches")
+}
+
+enum RouteMatchStatus {
+  SUGGESTED
+  DISMISSED
+  PROPOSED
+  EXPIRED
 }

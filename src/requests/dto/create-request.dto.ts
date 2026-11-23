@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsNumber, IsBoolean, IsDateString, IsIn } from 'class-validator';
 
 export class CreateRequestDto {
   @IsString()
@@ -43,6 +43,12 @@ export class CreateRequestDto {
   @IsOptional()
   @IsString()
   originAddress?: string;
+
+  // Tamaño del paquete (solo categorías con requiresRoute): se cruza con lo
+  // que acepta llevar cada ruta de ofertante. Sin valor = pequeño.
+  @IsOptional()
+  @IsIn(['SMALL', 'MEDIUM', 'LARGE'])
+  packageSize?: 'SMALL' | 'MEDIUM' | 'LARGE';
 
   @IsOptional()
   @IsBoolean()

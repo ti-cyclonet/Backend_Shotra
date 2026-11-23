@@ -9,6 +9,7 @@ import {
   requesterReputation,
 } from '../ratings/reputation';
 import { assertRequestRules } from './request-validation';
+import { RouteMatcherService } from '../routes/route-matcher.service';
 
 /** Adjunta el resumen de reputación (insignias, criterios, % recontratación). */
 function withProviderReputation<T extends Parameters<typeof providerReputation>[0]>(p: T | null) {
@@ -38,7 +39,19 @@ function closesAt(r: { createdAt: Date; expiresAt: Date | null; scheduledAt: Dat
 
 @Injectable()
 export class RequestsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly routeMatcher: RouteMatcherService,
+  ) {}
+
+  /**
+   * Cruza la solicitud con las rutas publicadas por ofertantes, sin hacer
+   * esperar la respuesta (el matcher nunca lanza). Aplica igual a los
+   * domicilios que publica InOut, que usan este mismo endpoint.
+   */
+  private matchRoutesInBackground(requestId: string) {
+    void this.routeMatcher.matchRequest(requestId);
+  }
 
   /** Crear una solicitud de servicio */
   async create(userId: string, dto: CreateRequestDto) {
@@ -64,7 +77,7 @@ export class RequestsService {
     }
     const expiresAt = computeExpiresAt(new Date(), !!dto.isUrgent, scheduledAt);
 
-    return this.prisma.serviceRequest.create({
+    const created = await this.prisma.serviceRequest.create({
       data: {
         requesterId: profile.id,
         categoryId: dto.categoryId,
@@ -78,6 +91,7 @@ export class RequestsService {
         originLatitude: dto.originLatitude,
         originLongitude: dto.originLongitude,
         originAddress: dto.originAddress,
+        packageSize: category.requiresRoute ? dto.packageSize ?? null : null,
         isRemote: dto.isRemote || false,
         scheduledAt,
         isUrgent: dto.isUrgent || false,
@@ -86,6 +100,8 @@ export class RequestsService {
       },
       include: { category: true, requester: { select: { displayName: true, avatarUrl: true, averageRating: true } } },
     });
+    if (category.requiresRoute) this.matchRoutesInBackground(created.id);
+    return created;
   }
 
   /** Listar solicitudes publicadas (para ofertantes) — filtradas por categoría y cercanía */
@@ -240,7 +256,14 @@ export class RequestsService {
     // Reputación del ofertante (como ofertante) y orden recomendado: primero las
     // pendientes, y entre ellas por promedio bayesiano (no por la que llegó antes).
     const ranked = ((request as any).proposals as any[])
-      .map((p) => ({ ...p, provider: withProviderReputation(p.provider) }))
+      // viaRoute: la oferta salió de una ruta del ofertante ("En ruta"). Al
+      // solicitante no se le expone la ruta, solo la etiqueta.
+      .map(({ routeId, ...p }) => ({
+        ...p,
+        ...(isRequester ? {} : { routeId }),
+        viaRoute: !!routeId,
+        provider: withProviderReputation(p.provider),
+      }))
       .sort((a, b) => {
         const pa = a.status === 'PENDING' ? 0 : 1;
         const pb = b.status === 'PENDING' ? 0 : 1;
@@ -305,7 +328,7 @@ export class RequestsService {
       throw new BadRequestException({ code: 'NEW_DATE_REQUIRED', message: 'La fecha que habías pedido ya pasó. Elige una nueva fecha para volver a publicarla.' });
     }
 
-    return this.prisma.serviceRequest.update({
+    const updated = await this.prisma.serviceRequest.update({
       where: { id: requestId },
       data: {
         status: 'PUBLISHED',
@@ -316,5 +339,7 @@ export class RequestsService {
       },
       include: { category: true },
     });
+    if (updated.category.requiresRoute) this.matchRoutesInBackground(updated.id);
+    return updated;
   }
 }
