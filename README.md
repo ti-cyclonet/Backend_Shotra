@@ -185,3 +185,7 @@ COMPLETED  -> aquí (y solo aquí) se devenga la comisión
 - **Fase 2 (futuro)**: escrow/split payments con un PSP licenciado
   (Wompi/Mercado Pago) y cuenta empresarial; el PSP custodia, no SHOTRA. El
   webhook de confirmación reemplazará el polling.
+- **Pedidos en ruta**: el domiciliario publica un trayecto y Shotra le sugiere
+  los domicilios que caen en su camino (PostGIS + OSRM). Diseño, reglas de
+  coincidencia y tareas pendientes en
+  [`docs/specs/pedidos-en-ruta.md`](docs/specs/pedidos-en-ruta.md).
